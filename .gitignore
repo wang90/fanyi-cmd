@@ -1,2 +1,6 @@
 node_modules
 pnpm-lock.yaml
+web/node_modules
+web/dist
+package-lock.json
+web/package-lock.json
