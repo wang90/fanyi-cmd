@@ -1,10 +1,14 @@
 # fanyi-cli
 
-一个功能强大的命令行翻译工具，支持多个AI翻译服务提供商和Web可视化界面。
+一个以 `ai` 为主入口的命令行 AI 工具，同时保留 `fanyi` 翻译能力，并支持 Web 可视化配置界面。
 
 ## 基本使用
 
 ```bash
+ai 解释一下什么是向量数据库      # 进行AI问答
+ai "帮我写一个 Python 快排"      # 进行AI问答
+ai -p qwen 帮我总结这段文本      # 指定模型提供商问答
+
 fanyi apple                    # 使用LibreTranslate翻译为中文（免费）
 fanyi 你好世界                  # 翻译为英语
 fanyi hello -t ja             # 翻译为日语
@@ -14,6 +18,26 @@ fanyi -v                      # 查看版本
 fanyi -h                      # 查看帮助
 fanyi -man                    # 显示详细手册
 ```
+
+## AI 命令
+
+### 问答
+
+```bash
+ai 你好
+ai "解释一下什么是 RAG"
+ai -p deepseek 帮我写个正则表达式
+```
+
+### 配置
+
+```bash
+ai config                      # 查看当前AI默认配置
+ai config -p deepseek          # 设置默认 provider
+ai web                         # 打开Web界面配置API Key
+```
+
+> 说明：`ai` 问答需要可用的 API Key（deepseek/qwen/openai）；`libre` 仅支持翻译，不支持问答。
 
 ## 命令行选项
 

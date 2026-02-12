@@ -4,6 +4,7 @@
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_PATH="$SCRIPT_DIR/bin/fanyi.js"
+AI_BIN_PATH="$SCRIPT_DIR/bin/ai.js"
 
 echo "🚀 正在安装 fanyi-cli..."
 
@@ -33,6 +34,10 @@ if npm link 2>/dev/null; then
     echo "✅ 安装成功！"
     echo ""
     echo "现在可以使用以下命令："
+    echo "  ai 你好"
+    echo "  ai web"
+    echo "  ai -h"
+    echo ""
     echo "  fanyi hello"
     echo "  fanyi web"
     echo "  fanyi -h"
@@ -51,19 +56,21 @@ fi
 
 if [ -n "$SHELL_RC" ]; then
     # 检查别名是否已存在
-    if grep -q "alias fanyi=" "$SHELL_RC" 2>/dev/null; then
-        echo "⚠️  别名已存在，跳过添加"
-    else
+    if ! grep -q "alias fanyi=" "$SHELL_RC" 2>/dev/null; then
         echo "alias fanyi=\"node $BIN_PATH\"" >> "$SHELL_RC"
-        echo "✅ 已添加别名到 $SHELL_RC"
-        echo ""
-        echo "请运行以下命令使别名生效："
-        echo "  source $SHELL_RC"
-        echo ""
-        echo "或者重新打开终端窗口"
     fi
+    if ! grep -q "alias ai=" "$SHELL_RC" 2>/dev/null; then
+        echo "alias ai=\"node $AI_BIN_PATH\"" >> "$SHELL_RC"
+    fi
+    echo "✅ 已添加命令别名到 $SHELL_RC（若已存在则跳过）"
+    echo ""
+    echo "请运行以下命令使别名生效："
+    echo "  source $SHELL_RC"
+    echo ""
+    echo "或者重新打开终端窗口"
 else
     echo "⚠️  无法自动检测 shell，请手动添加别名："
+    echo "  alias ai=\"node $AI_BIN_PATH\""
     echo "  alias fanyi=\"node $BIN_PATH\""
 fi
 
@@ -71,6 +78,10 @@ echo ""
 echo "✅ 安装完成！"
 echo ""
 echo "使用方法："
+echo "  ai 你好              # AI 问答"
+echo "  ai web               # 启动Web界面"
+echo "  ai -h                # 查看帮助"
+echo ""
 echo "  fanyi hello          # 翻译文本"
 echo "  fanyi web            # 启动Web界面"
 echo "  fanyi -h             # 查看帮助"

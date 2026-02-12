@@ -83,6 +83,37 @@ async function translateWithAI(provider, text, from, to, apiKey) {
   }
 }
 
+// 使用AI模型进行通用问答
+async function askWithAI(provider, question, apiKey) {
+  const providerConfig = PROVIDERS[provider];
+  const url = `${providerConfig.baseUrl}/chat/completions`;
+  const headers = {
+    'Content-Type': 'application/json',
+    'Authorization': `Bearer ${apiKey}`,
+  };
+  const data = {
+    model: providerConfig.defaultModel,
+    messages: [
+      {
+        role: 'system',
+        content: 'You are a helpful AI assistant. Answer clearly and concisely in Chinese unless the user requests another language.',
+      },
+      { role: 'user', content: question },
+    ],
+    temperature: 0.7,
+  };
+
+  try {
+    const response = await axios.post(url, data, { headers });
+    return response.data.choices[0].message.content.trim();
+  } catch (error) {
+    if (error.response) {
+      throw new Error(`API错误: ${error.response.status} - ${error.response.data?.error?.message || JSON.stringify(error.response.data)}`);
+    }
+    throw error;
+  }
+}
+
 // 使用LibreTranslate进行翻译（免费服务）
 async function translateWithLibre(text, from, to) {
   try {
@@ -133,4 +164,30 @@ export async function translate(text, config) {
   }
   
   return await translateWithAI(provider, text, from, to, apiKey);
+}
+
+// 主问答函数
+export async function ask(question, config) {
+  const { provider = 'deepseek', apiKeys = {} } = config;
+  const providerConfig = PROVIDERS[provider];
+
+  if (!providerConfig) {
+    throw new Error(`未知的AI服务提供商: ${provider}`);
+  }
+
+  if (provider === 'libre') {
+    throw new Error('LibreTranslate 仅支持翻译，不支持通用问答。请将 provider 设置为 deepseek / qwen / openai。');
+  }
+
+  // 获取API Key（优先使用配置中的，其次使用环境变量）
+  let apiKey = apiKeys[provider];
+  if (!apiKey && providerConfig.apiKeyEnv) {
+    apiKey = process.env[providerConfig.apiKeyEnv];
+  }
+
+  if (!apiKey) {
+    throw new Error(`请配置${providerConfig.name}的API Key。可以通过Web界面配置或设置环境变量${providerConfig.apiKeyEnv}`);
+  }
+
+  return await askWithAI(provider, question, apiKey);
 }
