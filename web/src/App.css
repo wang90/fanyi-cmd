@@ -22,6 +22,12 @@
   font-size: 22px;
 }
 
+.subtitle {
+  margin-top: 8px;
+  opacity: 0.92;
+  font-size: 14px;
+}
+
 .content-wrapper {
   flex: 1;
   overflow: hidden;
@@ -74,6 +80,164 @@
   flex: 1;
   min-width: 0;
   overflow: auto;
+}
+
+.assistant-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.assistant-head h3 {
+  margin: 0;
+  color: #0f172a;
+}
+
+.assistant-head p {
+  margin-top: 6px;
+  font-size: 13px;
+  color: #475569;
+}
+
+.assistant-question-block,
+.assistant-answer-block {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.assistant-label {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1f2937;
+}
+
+.assistant-textarea {
+  width: 100%;
+  resize: vertical;
+  min-height: 120px;
+  padding: 12px;
+  border-radius: 8px;
+  border: 1px solid #d0d7de;
+  font-size: 15px;
+  line-height: 1.5;
+}
+
+.assistant-textarea:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.assistant-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.save-btn.secondary {
+  background: #374151;
+}
+
+.save-btn.secondary:hover:not(:disabled) {
+  box-shadow: 0 4px 12px rgba(55, 65, 81, 0.35);
+}
+
+.assistant-answer {
+  white-space: pre-wrap;
+  word-break: break-word;
+  min-height: 140px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 12px;
+  color: #111827;
+  line-height: 1.6;
+}
+
+.tokens-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.tokens-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.token-item {
+  display: grid;
+  grid-template-columns: 180px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  background: #fff;
+}
+
+.token-item.custom {
+  grid-template-columns: 180px minmax(0, 1fr) 70px;
+}
+
+.token-meta {
+  min-width: 0;
+}
+
+.token-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.token-desc {
+  margin-top: 3px;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.token-input {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid #d0d7de;
+  font-size: 14px;
+}
+
+.token-input:focus {
+  outline: none;
+  border-color: #3b82f6;
+  box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.15);
+}
+
+.token-remove-btn {
+  border: none;
+  border-radius: 6px;
+  padding: 8px;
+  background: #ef4444;
+  color: #fff;
+  cursor: pointer;
+}
+
+.token-add-box {
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f8fafc;
+}
+
+.token-add-box h4 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #1f2937;
+}
+
+.token-add-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 8px;
 }
 
 .toast {
@@ -510,5 +674,23 @@
   .preview-input {
     width: 100%;
     min-width: 0;
+  }
+
+  .assistant-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .save-btn {
+    width: 100%;
+  }
+
+  .token-item,
+  .token-item.custom {
+    grid-template-columns: 1fr;
+  }
+
+  .token-add-row {
+    grid-template-columns: 1fr;
   }
 }

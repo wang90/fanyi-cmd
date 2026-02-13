@@ -4,7 +4,7 @@ import { MongoClient } from 'mongodb';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { translate as previewTranslate } from '../src/providers.js';
+import { translate as previewTranslate, ask as askAI } from '../src/providers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -93,6 +93,26 @@ app.post('/api/preview', async (req, res) => {
     };
     const result = await previewTranslate(text, previewConfig);
     res.json({ success: true, text, result });
+  } catch (error) {
+    res.status(400).json({ success: false, error: error.message });
+  }
+});
+
+// AI问答（不写入历史）
+app.post('/api/ask', async (req, res) => {
+  try {
+    const question = (req.body?.question || '').toString().trim();
+    if (!question) {
+      return res.status(400).json({ success: false, error: '问题不能为空' });
+    }
+
+    const cfg = req.body?.config || {};
+    const askConfig = {
+      provider: cfg.provider || 'deepseek',
+      apiKeys: cfg.apiKeys || {},
+    };
+    const answer = await askAI(question, askConfig);
+    res.json({ success: true, question, answer });
   } catch (error) {
     res.status(400).json({ success: false, error: error.message });
   }

@@ -11,7 +11,7 @@ const PROVIDERS = {
 };
 
 function App() {
-  const [activeTab, setActiveTab] = useState('config');
+  const [activeTab, setActiveTab] = useState('assistant');
   const [config, setConfig] = useState({
     from: 'auto',
     to: 'zh',
@@ -27,6 +27,31 @@ function App() {
   const [previewText, setPreviewText] = useState('hello');
   const [previewResult, setPreviewResult] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
+  const [askProvider, setAskProvider] = useState('deepseek');
+  const [askQuestion, setAskQuestion] = useState('');
+  const [askAnswer, setAskAnswer] = useState('');
+  const [askLoading, setAskLoading] = useState(false);
+  const [newTokenProvider, setNewTokenProvider] = useState('');
+  const [newTokenValue, setNewTokenValue] = useState('');
+
+  const AI_PROVIDERS = Object.fromEntries(
+    Object.entries(PROVIDERS).filter(([key]) => key !== 'libre')
+  );
+  const BUILTIN_TOKEN_KEYS = Object.keys(AI_PROVIDERS);
+  const customTokenEntries = Object.entries(config.apiKeys || {}).filter(
+    ([key]) => !BUILTIN_TOKEN_KEYS.includes(key)
+  );
+  const LANG_OPTIONS = [
+    ['auto', '自动检测'],
+    ['zh', '中文'],
+    ['en', '英语'],
+    ['ja', '日语'],
+    ['ko', '韩语'],
+    ['fr', '法语'],
+    ['de', '德语'],
+    ['es', '西班牙语'],
+    ['ru', '俄语'],
+  ];
 
   useEffect(() => {
     loadConfig();
@@ -45,6 +70,9 @@ function App() {
         token: loaded.token || '',
         apiKeys: loaded.apiKeys || {},
       });
+      if (loaded.provider && loaded.provider !== 'libre') {
+        setAskProvider(loaded.provider);
+      }
     } catch (error) {
       showMessage('error', '加载配置失败: ' + error.message);
     }
@@ -130,6 +158,9 @@ function App() {
   const loadPreset = (preset) => {
     if (!preset?.config) return;
     setConfig(preset.config);
+    if (preset.config.provider && preset.config.provider !== 'libre') {
+      setAskProvider(preset.config.provider);
+    }
     showMessage('success', `已加载方案：${preset.name}`);
   };
 
@@ -163,11 +194,73 @@ function App() {
     }
   };
 
+  const runAsk = async () => {
+    const question = askQuestion.trim();
+    if (!question) {
+      showMessage('error', '请输入问题');
+      return;
+    }
+    setAskLoading(true);
+    setAskAnswer('');
+    try {
+      const res = await axios.post(`${API_BASE}/ask`, {
+        question,
+        config: {
+          ...config,
+          provider: askProvider,
+        },
+      });
+      setAskAnswer(res.data?.answer || '');
+      showMessage('success', '回答已生成');
+    } catch (error) {
+      showMessage(
+        'error',
+        error?.response?.data?.error || ('问答失败: ' + error.message)
+      );
+    } finally {
+      setAskLoading(false);
+    }
+  };
+
+  const updateApiKey = (provider, value) => {
+    const nextApiKeys = {
+      ...(config.apiKeys || {}),
+      [provider]: value,
+    };
+    setConfig({ ...config, apiKeys: nextApiKeys });
+  };
+
+  const removeApiKey = (provider) => {
+    const nextApiKeys = { ...(config.apiKeys || {}) };
+    delete nextApiKeys[provider];
+    setConfig({ ...config, apiKeys: nextApiKeys });
+    if (askProvider === provider) {
+      setAskProvider('deepseek');
+    }
+  };
+
+  const addCustomToken = () => {
+    const provider = newTokenProvider.trim().toLowerCase();
+    if (!provider) {
+      showMessage('error', '请输入 token 标识名称');
+      return;
+    }
+    if (provider === 'libre') {
+      showMessage('error', 'libre 不需要 token');
+      return;
+    }
+    updateApiKey(provider, newTokenValue.trim());
+    setNewTokenProvider('');
+    setNewTokenValue('');
+    showMessage('success', `已添加 token 入口: ${provider}`);
+  };
+
   return (
     <div className="app">
       <div className="container">
         <div className="header">
-          <h1 className="title">🌐 翻译工具配置</h1>
+          <h1 className="title">🤖 AI 命令行工具面板</h1>
+          <p className="subtitle">默认命令为 ai，翻译功能继续使用 fanyi</p>
         </div>
 
         <div className="content-wrapper">
@@ -175,10 +268,22 @@ function App() {
             <aside className="sidebar">
               <div className="tabs">
                 <button
+                  className={`tab ${activeTab === 'assistant' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('assistant')}
+                >
+                  🤖 AI 助手
+                </button>
+                <button
                   className={`tab ${activeTab === 'config' ? 'active' : ''}`}
                   onClick={() => setActiveTab('config')}
                 >
-                  ⚙️ 配置
+                  ⚙️ 翻译配置 (fanyi)
+                </button>
+                <button
+                  className={`tab ${activeTab === 'tokens' ? 'active' : ''}`}
+                  onClick={() => setActiveTab('tokens')}
+                >
+                  🔑 Token 管理
                 </button>
                 <button
                   className={`tab ${activeTab === 'history' ? 'active' : ''}`}
@@ -190,12 +295,79 @@ function App() {
             </aside>
 
             <main className="content-area">
+              {activeTab === 'assistant' && (
+                <div className="assistant-panel">
+                  <div className="assistant-head">
+                    <h3>AI 问答</h3>
+                    <p>这里模拟命令：`ai &lt;你的问题&gt;`</p>
+                  </div>
+
+                  <div className="form-row">
+                    <div className="form-group provider-group">
+                      <label>AI 服务提供商</label>
+                      <select
+                        className="provider-select"
+                        value={askProvider}
+                        onChange={(e) => setAskProvider(e.target.value)}
+                      >
+                        {Object.entries(AI_PROVIDERS).map(([key, label]) => (
+                          <option key={key} value={key}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div className="form-group token-group">
+                      <label>API Token</label>
+                      <input
+                        type="password"
+                        value={config.apiKeys?.[askProvider] || ''}
+                        onChange={(e) => {
+                          const nextApiKeys = {
+                            ...(config.apiKeys || {}),
+                            [askProvider]: e.target.value,
+                          };
+                          setConfig({ ...config, apiKeys: nextApiKeys });
+                        }}
+                        placeholder={`输入 ${AI_PROVIDERS[askProvider]} 的 Token`}
+                      />
+                    </div>
+                  </div>
+
+                  <div className="assistant-question-block">
+                    <label className="assistant-label">问题输入</label>
+                    <textarea
+                      className="assistant-textarea"
+                      value={askQuestion}
+                      onChange={(e) => setAskQuestion(e.target.value)}
+                      placeholder="例如：解释一下什么是 RAG，并给一个简单例子"
+                      rows={6}
+                    />
+                  </div>
+
+                  <div className="assistant-actions">
+                    <button className="save-btn" onClick={runAsk} disabled={askLoading}>
+                      {askLoading ? '生成中...' : '发送问题'}
+                    </button>
+                    <button className="save-btn secondary" onClick={saveConfig} disabled={loading}>
+                      {loading ? '保存中...' : '保存当前配置'}
+                    </button>
+                  </div>
+
+                  <div className="assistant-answer-block">
+                    <label className="assistant-label">回答输出</label>
+                    <div className="assistant-answer">{askAnswer || '回答将显示在这里'}</div>
+                  </div>
+                </div>
+              )}
+
               {activeTab === 'config' && (
                 <div className="config-layout">
                   <div className="config-panel">
                     <div className="form-row">
                       <div className="form-group provider-group">
-                        <label>翻译服务提供商</label>
+                        <label>翻译服务提供商 (fanyi)</label>
                         <select
                           className="provider-select"
                           value={config.provider || 'libre'}
@@ -234,15 +406,11 @@ function App() {
                           value={config.from || 'auto'}
                           onChange={(e) => setConfig({ ...config, from: e.target.value })}
                         >
-                          <option value="auto">自动检测</option>
-                          <option value="zh">中文</option>
-                          <option value="en">英语</option>
-                          <option value="ja">日语</option>
-                          <option value="ko">韩语</option>
-                          <option value="fr">法语</option>
-                          <option value="de">德语</option>
-                          <option value="es">西班牙语</option>
-                          <option value="ru">俄语</option>
+                          {LANG_OPTIONS.map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
                         </select>
                       </div>
 
@@ -252,14 +420,11 @@ function App() {
                           value={config.to || 'zh'}
                           onChange={(e) => setConfig({ ...config, to: e.target.value })}
                         >
-                          <option value="zh">中文</option>
-                          <option value="en">英语</option>
-                          <option value="ja">日语</option>
-                          <option value="ko">韩语</option>
-                          <option value="fr">法语</option>
-                          <option value="de">德语</option>
-                          <option value="es">西班牙语</option>
-                          <option value="ru">俄语</option>
+                          {LANG_OPTIONS.filter(([value]) => value !== 'auto').map(([value, label]) => (
+                            <option key={value} value={value}>
+                              {label}
+                            </option>
+                          ))}
                         </select>
                       </div>
                     </div>
@@ -322,6 +487,78 @@ function App() {
                       </div>
                     )}
                   </div>
+                </div>
+              )}
+
+              {activeTab === 'tokens' && (
+                <div className="tokens-panel">
+                  <div className="assistant-head">
+                    <h3>Token 管理中心</h3>
+                    <p>统一管理所有 provider token，新增后可用于 ai / fanyi 命令与页面联调。</p>
+                  </div>
+
+                  <div className="tokens-list">
+                    {BUILTIN_TOKEN_KEYS.map((provider) => (
+                      <div className="token-item" key={provider}>
+                        <div className="token-meta">
+                          <div className="token-name">{provider}</div>
+                          <div className="token-desc">{AI_PROVIDERS[provider]}</div>
+                        </div>
+                        <input
+                          type="password"
+                          className="token-input"
+                          value={config.apiKeys?.[provider] || ''}
+                          onChange={(e) => updateApiKey(provider, e.target.value)}
+                          placeholder={`输入 ${AI_PROVIDERS[provider]} Token`}
+                        />
+                      </div>
+                    ))}
+
+                    {customTokenEntries.map(([provider, token]) => (
+                      <div className="token-item custom" key={provider}>
+                        <div className="token-meta">
+                          <div className="token-name">{provider}</div>
+                          <div className="token-desc">自定义 provider</div>
+                        </div>
+                        <input
+                          type="password"
+                          className="token-input"
+                          value={token || ''}
+                          onChange={(e) => updateApiKey(provider, e.target.value)}
+                          placeholder={`输入 ${provider} Token`}
+                        />
+                        <button className="token-remove-btn" onClick={() => removeApiKey(provider)}>
+                          删除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className="token-add-box">
+                    <h4>新增自定义 Token 入口</h4>
+                    <div className="token-add-row">
+                      <input
+                        className="token-input"
+                        value={newTokenProvider}
+                        onChange={(e) => setNewTokenProvider(e.target.value)}
+                        placeholder="provider 名称（如 claude / kimi）"
+                      />
+                      <input
+                        type="password"
+                        className="token-input"
+                        value={newTokenValue}
+                        onChange={(e) => setNewTokenValue(e.target.value)}
+                        placeholder="token（可先留空，后续再填）"
+                      />
+                      <button className="preview-btn" onClick={addCustomToken}>
+                        添加入口
+                      </button>
+                    </div>
+                  </div>
+
+                  <button className="save-btn" onClick={saveConfig} disabled={loading}>
+                    {loading ? '保存中...' : '💾 保存 Token 配置'}
+                  </button>
                 </div>
               )}
 
