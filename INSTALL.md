@@ -5,7 +5,7 @@
 在项目目录下运行：
 
 ```bash
-cd /Users/wang90/fanyi-cli
+cd /Users/wang90/ai-cmd
 npm link
 ```
 
@@ -18,7 +18,7 @@ sudo npm link
 ## 方式2: 全局安装
 
 ```bash
-cd /Users/wang90/fanyi-cli
+cd /Users/wang90/ai-cmd
 sudo npm install -g .
 ```
 
@@ -28,15 +28,15 @@ sudo npm install -g .
 
 ```bash
 # 添加到 ~/.zshrc
-echo 'alias fanyi="node /Users/wang90/fanyi-cli/bin/fanyi.js"' >> ~/.zshrc
+echo 'alias fanyi="node /Users/wang90/ai-cmd/bin/fanyi.js"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 ## 方式4: 直接使用 node 运行
 
 ```bash
-node /Users/wang90/fanyi-cli/bin/fanyi.js hello
-node /Users/wang90/fanyi-cli/bin/fanyi.js web
+node /Users/wang90/ai-cmd/bin/fanyi.js hello
+node /Users/wang90/ai-cmd/bin/fanyi.js web
 ```
 
 ## 验证安装

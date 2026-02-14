@@ -497,42 +497,59 @@ function App() {
                     <p>统一管理所有 provider token，新增后可用于 ai / fanyi 命令与页面联调。</p>
                   </div>
 
-                  <div className="tokens-list">
-                    {BUILTIN_TOKEN_KEYS.map((provider) => (
-                      <div className="token-item" key={provider}>
-                        <div className="token-meta">
-                          <div className="token-name">{provider}</div>
-                          <div className="token-desc">{AI_PROVIDERS[provider]}</div>
-                        </div>
-                        <input
-                          type="password"
-                          className="token-input"
-                          value={config.apiKeys?.[provider] || ''}
-                          onChange={(e) => updateApiKey(provider, e.target.value)}
-                          placeholder={`输入 ${AI_PROVIDERS[provider]} Token`}
-                        />
-                      </div>
-                    ))}
-
-                    {customTokenEntries.map(([provider, token]) => (
-                      <div className="token-item custom" key={provider}>
-                        <div className="token-meta">
-                          <div className="token-name">{provider}</div>
-                          <div className="token-desc">自定义 provider</div>
-                        </div>
-                        <input
-                          type="password"
-                          className="token-input"
-                          value={token || ''}
-                          onChange={(e) => updateApiKey(provider, e.target.value)}
-                          placeholder={`输入 ${provider} Token`}
-                        />
-                        <button className="token-remove-btn" onClick={() => removeApiKey(provider)}>
-                          删除
-                        </button>
-                      </div>
-                    ))}
+                  <div className="token-summary">
+                    <span>内置入口 {BUILTIN_TOKEN_KEYS.length} 个</span>
+                    <span>自定义入口 {customTokenEntries.length} 个</span>
                   </div>
+
+                  <section className="token-section">
+                    <h4 className="token-section-title">内置 Provider Token</h4>
+                    <div className="tokens-list">
+                      {BUILTIN_TOKEN_KEYS.map((provider) => (
+                        <div className="token-item" key={provider}>
+                          <div className="token-meta">
+                            <div className="token-name">{provider}</div>
+                            <div className="token-desc">{AI_PROVIDERS[provider]}</div>
+                          </div>
+                          <input
+                            type="password"
+                            className="token-input"
+                            value={config.apiKeys?.[provider] || ''}
+                            onChange={(e) => updateApiKey(provider, e.target.value)}
+                            placeholder={`输入 ${AI_PROVIDERS[provider]} Token`}
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </section>
+
+                  <section className="token-section">
+                    <h4 className="token-section-title">自定义 Provider Token</h4>
+                    <div className="tokens-list">
+                      {customTokenEntries.length === 0 ? (
+                        <div className="token-empty-tip">暂无自定义 provider，可在下方新增。</div>
+                      ) : (
+                        customTokenEntries.map(([provider, token]) => (
+                          <div className="token-item custom" key={provider}>
+                            <div className="token-meta">
+                              <div className="token-name">{provider}</div>
+                              <div className="token-desc">自定义 provider</div>
+                            </div>
+                            <input
+                              type="password"
+                              className="token-input"
+                              value={token || ''}
+                              onChange={(e) => updateApiKey(provider, e.target.value)}
+                              placeholder={`输入 ${provider} Token`}
+                            />
+                            <button className="token-remove-btn" onClick={() => removeApiKey(provider)}>
+                              删除
+                            </button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </section>
 
                   <div className="token-add-box">
                     <h4>新增自定义 Token 入口</h4>
@@ -556,7 +573,7 @@ function App() {
                     </div>
                   </div>
 
-                  <button className="save-btn" onClick={saveConfig} disabled={loading}>
+                  <button className="save-btn token-save-btn" onClick={saveConfig} disabled={loading}>
                     {loading ? '保存中...' : '💾 保存 Token 配置'}
                   </button>
                 </div>

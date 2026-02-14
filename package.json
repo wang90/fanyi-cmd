@@ -1,5 +1,5 @@
 {
-  "name": "fanyi-cli",
+  "name": "ai-cmd",
   "version": "1.0.0",
   "description": "AI command line assistant with translation support",
   "bin": {

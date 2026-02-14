@@ -1,10 +1,11 @@
 .app {
   width: 100%;
   height: 100vh;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
 }
 
 .container {
-  background: white;
+  background: transparent;
   width: 100%;
   height: 100%;
   display: flex;
@@ -31,20 +32,23 @@
 .content-wrapper {
   flex: 1;
   overflow: hidden;
-  padding: 20px;
+  padding: 18px;
 }
 
 .layout {
   display: flex;
-  gap: 20px;
+  gap: 16px;
   height: 100%;
 }
 
 .sidebar {
-  width: 220px;
+  width: 230px;
   flex-shrink: 0;
-  border-right: 1px solid #e5e7eb;
-  padding-right: 16px;
+  border: 1px solid #dbe3ef;
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
 }
 
 .tabs {
@@ -54,25 +58,30 @@
 }
 
 .tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   padding: 12px 14px;
-  border: none;
-  background: none;
+  border: 1px solid transparent;
+  background: #f8fafc;
   cursor: pointer;
   font-size: 15px;
-  color: #666;
+  color: #475569;
   text-align: left;
   border-radius: 8px;
-  transition: all 0.3s;
+  transition: all 0.2s ease;
 }
 
 .tab:hover {
-  color: #3b82f6;
-  background: #f8fafc;
+  color: #1d4ed8;
+  background: #eff6ff;
+  border-color: #bfdbfe;
 }
 
 .tab.active {
-  color: #3b82f6;
+  color: #1d4ed8;
   background: #eff6ff;
+  border-color: #93c5fd;
   font-weight: 600;
 }
 
@@ -80,6 +89,11 @@
   flex: 1;
   min-width: 0;
   overflow: auto;
+  background: #ffffff;
+  border: 1px solid #dbe3ef;
+  border-radius: 12px;
+  padding: 18px;
+  box-shadow: 0 8px 24px rgba(15, 23, 42, 0.04);
 }
 
 .assistant-panel {
@@ -161,6 +175,34 @@
   gap: 16px;
 }
 
+.token-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.token-summary span {
+  font-size: 12px;
+  color: #334155;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  padding: 4px 10px;
+}
+
+.token-section {
+  border: 1px solid #e2e8f0;
+  border-radius: 12px;
+  padding: 12px;
+  background: #fbfdff;
+}
+
+.token-section-title {
+  margin: 0 0 10px 0;
+  color: #0f172a;
+  font-size: 14px;
+}
+
 .tokens-list {
   display: flex;
   flex-direction: column;
@@ -174,7 +216,7 @@
   align-items: center;
   padding: 10px;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
+  border-radius: 10px;
   background: #fff;
 }
 
@@ -221,10 +263,14 @@
   cursor: pointer;
 }
 
+.token-remove-btn:hover {
+  background: #dc2626;
+}
+
 .token-add-box {
   border: 1px dashed #cbd5e1;
-  border-radius: 8px;
-  padding: 12px;
+  border-radius: 12px;
+  padding: 14px;
   background: #f8fafc;
 }
 
@@ -238,6 +284,19 @@
   display: grid;
   grid-template-columns: 1fr 1fr auto;
   gap: 8px;
+}
+
+.token-empty-tip {
+  border: 1px dashed #cbd5e1;
+  border-radius: 8px;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 13px;
+  padding: 10px;
+}
+
+.token-save-btn {
+  margin-top: 4px;
 }
 
 .toast {
@@ -635,10 +694,8 @@
 
   .sidebar {
     width: 100%;
-    border-right: none;
-    border-bottom: 1px solid #e5e7eb;
-    padding-right: 0;
-    padding-bottom: 10px;
+    border-right: 1px solid #dbe3ef;
+    padding: 10px;
   }
 
   .tabs {
@@ -683,6 +740,10 @@
 
   .save-btn {
     width: 100%;
+  }
+
+  .content-area {
+    padding: 14px;
   }
 
   .token-item,

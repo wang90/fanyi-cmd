@@ -120,7 +120,7 @@ fanyi 你好世界
 ## 项目结构
 
 ```
-fanyi-cli/
+ai-cmd/
 ├── bin/
 │   └── fanyi.js          # CLI入口文件
 ├── src/

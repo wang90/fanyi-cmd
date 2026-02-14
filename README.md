@@ -1,184 +1,105 @@
-# Fanyi CMD
+# ai-cmd
 
-一个以 `ai` 为主入口的命令行 AI 工具，同时保留 `fanyi` 翻译能力，并支持 Web 可视化配置界面。
+一个以 `ai` 为默认入口的命令行 AI 工具，保留 `fanyi` 作为翻译子能力，并提供 Web 配置面板。
 
-## 基本使用
+## 核心定位
 
-```bash
-ai 解释一下什么是向量数据库      # 进行AI问答
-ai "帮我写一个 Python 快排"      # 进行AI问答
-ai -p qwen 帮我总结这段文本      # 指定模型提供商问答
+- `ai`：通用 AI 问答命令（主入口）
+- `fanyi`：翻译命令（兼容原有习惯）
+- `web` 面板：统一管理配置、Token、翻译预览和历史记录
 
-fanyi apple                    # 使用LibreTranslate翻译为中文（免费）
-fanyi 你好世界                  # 翻译为英语
-fanyi hello -t ja             # 翻译为日语
-fanyi apple -t en -f zh       # 从中文翻译为英语
-fanyi hello -p deepseek       # 使用DeepSeek翻译
-fanyi -v                      # 查看版本
-fanyi -h                      # 查看帮助
-fanyi -man                    # 显示详细手册
-```
-
-## AI 命令
-
-### 问答
+## 快速开始
 
 ```bash
-ai 你好
-ai "解释一下什么是 RAG"
-ai -p deepseek 帮我写个正则表达式
-```
+# 安装依赖
+npm install
+cd web && npm install && cd ..
 
-### 配置
-
-```bash
-ai config                      # 查看当前AI默认配置
-ai config -p deepseek          # 设置默认 provider
-ai web                         # 打开Web界面配置API Key
-```
-
-> 说明：`ai` 问答需要可用的 API Key（deepseek/qwen/openai）；`libre` 仅支持翻译，不支持问答。
-
-## 命令行选项
-
-```bash
--t, --to <语言>              设置目标语言 (默认: zh)
--f, --from <语言>            设置源语言 (默认: auto)
--p, --provider <服务商>      设置翻译服务提供商
--man, --manual               显示详细使用手册
--h, --help                   显示帮助信息
--v, --version                显示版本信息
-```
-
-## 支持的翻译服务提供商
-
-### LibreTranslate (默认，免费)
-- 无需API Key
-- 免费使用
-- 适合日常翻译需求
-
-### DeepSeek
-- 需要API Key
-- 环境变量: `DEEPSEEK_API_KEY`
-- 获取API Key: https://platform.deepseek.com/
-
-### 通义千问 (Qwen)
-- 需要API Key
-- 环境变量: `DASHSCOPE_API_KEY`
-- 获取API Key: https://bailian.console.aliyun.com/
-
-### ChatGPT (OpenAI)
-- 需要API Key
-- 环境变量: `OPENAI_API_KEY`
-- 获取API Key: https://platform.openai.com/
-
-## 支持的语言
-
-- `zh` - 中文
-- `en` - 英语
-- `ja` - 日语
-- `ko` - 韩语
-- `fr` - 法语
-- `de` - 德语
-- `es` - 西班牙语
-- `ru` - 俄语
-- `pt` - 葡萄牙语
-- `it` - 意大利语
-- `ar` - 阿拉伯语
-- `auto` - 自动检测（仅源语言）
-
-## 命令
-
-### Web界面
-
-启动Web可视化界面进行配置和查看历史记录：
-
-**方式1: 使用命令行**
-```bash
-fanyi web
-```
-
-**方式2: 使用 npm scripts（推荐用于开发）**
-```bash
+# 开发模式（建议开两个终端）
+# 终端1：后端 + API
 npm run web
-# 或
-npm start
-# 或
-npm run start:web
-```
-
-然后在浏览器中打开 `http://localhost:3000`
-
-**开发模式（前端热重载）**
-```bash
-# 终端1: 启动后端服务器
-npm run web
-
-# 终端2: 启动前端开发服务器（支持热重载）
+# 终端2：前端热更新
 npm run dev:web
 ```
-前端开发服务器会在 `http://localhost:3001` 运行，并自动代理 API 请求到后端。
 
-### 交互式配置
+打开：
 
-**方式1: 使用命令行**
+- Web 配置页：`http://localhost:3000`
+- 前端开发页：`http://localhost:3001`
+
+## 命令行用法
+
+### 1) AI 问答（主入口）
+
 ```bash
-fanyi config
+ai 解释一下什么是 RAG
+ai "帮我写一个 Python 快排"
+ai -p qwen 总结这段文本
 ```
 
-**方式2: 使用 npm scripts**
+常用命令：
+
 ```bash
-npm run config
+ai -h
+ai config
+ai config -p deepseek
+ai web
 ```
 
-**方式3: 命令行参数（快速设置）**
-```bash
-fanyi config -t en -f zh -p deepseek
-# 或
-npm run config -- -t en -f zh -p deepseek
-```
+说明：
 
-### 查看手册
+- `ai` 仅支持 `deepseek / qwen / openai`
+- `libre` 是翻译引擎，不支持通用问答
+
+### 2) 翻译（保留 fanyi）
 
 ```bash
-fanyi -man
-# 或
-fanyi --manual
-```
-
-### Web界面功能
-
-- ⚙️ **配置管理**: 
-  - 选择翻译服务提供商（LibreTranslate/DeepSeek/通义千问/ChatGPT）
-  - 配置多个API Key
-  - 设置源语言和目标语言
-- 📜 **历史记录**: 查看、删除翻译历史记录
-- 💾 **数据持久化**: 使用MongoDB本地存储历史记录
-
-详细设置说明请查看 [WEB_SETUP.md](./WEB_SETUP.md)
-
-## API Key配置
-
-### 方式1: Web界面配置（推荐）
-```bash
+fanyi hello
+fanyi 你好 -t en
+fanyi apple -t ja -f en
+fanyi hello -p deepseek
 fanyi web
 ```
-在Web界面中选择服务提供商并输入对应的API Key。
 
-### 方式2: 环境变量配置
+翻译参数：
+
 ```bash
-# DeepSeek
+-t, --to <lang>            目标语言（默认 zh）
+-f, --from <lang>          源语言（默认 auto）
+-p, --provider <provider>  翻译提供商（libre/deepseek/qwen/openai）
+```
+
+## Web 面板说明
+
+当前 Web 页面已调整为 AI 优先，包含 4 个区块：
+
+- `AI 助手`：模拟 `ai <问题>`，可直接提问和查看回答
+- `翻译配置 (fanyi)`：管理翻译 provider、源/目标语言、翻译预览
+- `Token 管理`：统一维护所有 provider 的 token（含自定义 provider 入口）
+- `历史记录`：查看/删除翻译历史
+
+## Token 配置（推荐）
+
+### 方式 1：Web 统一管理（推荐）
+
+在 `Token 管理` 页面可直接维护：
+
+- 内置 token：`deepseek`、`qwen`、`openai`
+- 自定义 token：例如 `claude`、`kimi`（先建入口，后续可接入）
+
+保存后写入同一份配置文件：`~/.fanyi-config.json`
+
+### 方式 2：环境变量
+
+```bash
 export DEEPSEEK_API_KEY="your-deepseek-api-key"
-
-# 通义千问
 export DASHSCOPE_API_KEY="your-qwen-api-key"
-
-# ChatGPT
 export OPENAI_API_KEY="your-openai-api-key"
 ```
 
-### 方式3: 配置文件
-配置文件位置: `~/.fanyi-config.json`
+### 方式 3：直接编辑配置文件
+
+`~/.fanyi-config.json` 示例：
 
 ```json
 {
@@ -188,69 +109,50 @@ export OPENAI_API_KEY="your-openai-api-key"
   "apiKeys": {
     "deepseek": "your-api-key",
     "qwen": "your-api-key",
-    "openai": "your-api-key"
+    "openai": "your-api-key",
+    "claude": "custom-key"
   }
 }
 ```
 
-## 安装
+## 支持语言（fanyi）
 
-### 1. 安装依赖
+- `zh` 中文
+- `en` 英语
+- `ja` 日语
+- `ko` 韩语
+- `fr` 法语
+- `de` 德语
+- `es` 西班牙语
+- `ru` 俄语
+- `pt` 葡萄牙语
+- `it` 意大利语
+- `ar` 阿拉伯语
+- `auto` 自动检测（仅源语言）
 
-**重要：必须先安装依赖才能使用！**
+## 安装命令
 
-```bash
-# 安装主项目依赖
-npm install
+推荐：
 
-# 安装Web前端依赖
-cd web && npm install && cd ..
-
-# 构建Web前端（生产环境使用）
-npm run build
-```
-
-如果遇到网络问题，可以使用国内镜像：
-```bash
-npm install --registry=https://registry.npmmirror.com
-cd web && npm install --registry=https://registry.npmmirror.com && cd ..
-```
-
-### 2. 安装命令行工具
-
-**方式1: 使用安装脚本（推荐）**
 ```bash
 ./install.sh
 ```
 
-**方式2: 使用 npm link**
+或者：
+
 ```bash
 npm link
-# 如果遇到权限问题，使用:
-sudo npm link
 ```
 
-**方式3: 全局安装**
+安装后可直接使用：
+
 ```bash
-sudo npm install -g .
+ai -h
+fanyi -h
 ```
 
-**方式4: 使用别名（临时方案）**
-```bash
-# 添加到 ~/.zshrc 或 ~/.bashrc
-echo 'alias fanyi="node /Users/wang90/fanyi-cli/bin/fanyi.js"' >> ~/.zshrc
-source ~/.zshrc
-```
+## 相关文档
 
-**方式5: 直接使用**
-```bash
-node bin/fanyi.js hello
-node bin/fanyi.js web
-```
-
-详细安装说明请查看 [INSTALL.md](./INSTALL.md)
-
-## 依赖
-
-- Node.js
-- MongoDB (可选，用于存储历史记录)
+- 安装说明：`INSTALL.md`
+- Web 说明：`WEB_SETUP.md`
+- 快速上手：`QUICKSTART.md`

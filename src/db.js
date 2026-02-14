@@ -2,7 +2,7 @@
 let db = null;
 let client = null;
 let MongoClient = null;
-const DB_NAME = 'fanyi-cli';
+const DB_NAME = 'ai-cmd';
 const COLLECTION_NAME = 'history';
 
 async function connectDB() {

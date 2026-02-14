@@ -1,12 +1,12 @@
 #!/bin/bash
 
-# fanyi-cli 安装脚本
+# ai-cmd 安装脚本
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_PATH="$SCRIPT_DIR/bin/fanyi.js"
 AI_BIN_PATH="$SCRIPT_DIR/bin/ai.js"
 
-echo "🚀 正在安装 fanyi-cli..."
+echo "🚀 正在安装 ai-cmd..."
 
 # 检查 Node.js
 if ! command -v node &> /dev/null; then

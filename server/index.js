@@ -15,7 +15,7 @@ const PORT = 3000;
 // MongoDB连接
 let db = null;
 let client = null;
-const DB_NAME = 'fanyi-cli';
+const DB_NAME = 'ai-cmd';
 const COLLECTION_NAME = 'history';
 
 async function connectDB() {
