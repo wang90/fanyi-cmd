@@ -2,7 +2,7 @@
 import { Command } from 'commander';
 import fs from 'fs';
 import path from 'path';
-import { ask } from '../src/providers.js';
+import { ask, askStream } from '../src/providers.js';
 
 const program = new Command();
 const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
@@ -114,10 +114,26 @@ program
     }
 
     try {
-      const answer = await ask(input, config);
-      console.log(`\n🤖 ${answer}\n`);
+      let hasChunk = false;
+      process.stdout.write('\n🤖 ');
+      const answer = await askStream(input, config, (chunk) => {
+        hasChunk = true;
+        process.stdout.write(chunk);
+      });
+      if (!hasChunk) {
+        // 兼容少数 provider/网络场景下未分片返回
+        process.stdout.write(answer || '');
+      }
+      process.stdout.write('\n\n');
     } catch (err) {
-      console.error(`\n❌ AI 问答失败: ${err.message}\n`);
+      // 回退到非流式，尽量给出结果而不是直接失败
+      try {
+        const fallbackAnswer = await ask(input, config);
+        console.log(`\n🤖 ${fallbackAnswer}\n`);
+      } catch (fallbackErr) {
+        console.error(`\n❌ AI 问答失败: ${fallbackErr.message}\n`);
+        process.exitCode = 1;
+      }
       process.exitCode = 1;
     }
   });

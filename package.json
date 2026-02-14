@@ -8,7 +8,7 @@
   },
   "type": "module",
   "scripts": {
-    "dev": "node server/index.js",
+    "dev": "node --watch server/index.js",
     "web": "node server/index.js",
     "start": "node server/index.js",
     "start:web": "node server/index.js",

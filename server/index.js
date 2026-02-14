@@ -4,7 +4,7 @@ import { MongoClient } from 'mongodb';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
-import { translate as previewTranslate, ask as askAI } from '../src/providers.js';
+import { translate as previewTranslate, askStream as askAIStream } from '../src/providers.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -17,6 +17,46 @@ let db = null;
 let client = null;
 const DB_NAME = 'ai-cmd';
 const COLLECTION_NAME = 'history';
+const CONFIG_COLLECTION_NAME = 'config';
+const CONFIG_DOC_ID = 'default';
+
+function getConfigPath() {
+  return path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
+}
+
+function normalizeConfig(config = {}) {
+  const normalized = { ...config };
+  if (normalized.token && !normalized.apiKeys) {
+    normalized.apiKeys = {};
+  }
+  if (!normalized.provider) {
+    normalized.provider = 'libre';
+  }
+  if (!normalized.from) {
+    normalized.from = 'auto';
+  }
+  if (!normalized.to) {
+    normalized.to = 'zh';
+  }
+  if (!normalized.apiKeys || typeof normalized.apiKeys !== 'object') {
+    normalized.apiKeys = {};
+  }
+  return normalized;
+}
+
+function readConfigFromFile() {
+  const configPath = getConfigPath();
+  if (!fs.existsSync(configPath)) {
+    return null;
+  }
+  const fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  return normalizeConfig(fileConfig);
+}
+
+function writeConfigToFile(config) {
+  const configPath = getConfigPath();
+  fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
 
 async function connectDB() {
   if (db) {
@@ -42,38 +82,57 @@ app.use(express.json());
 // API路由（必须在静态文件服务之前）
 
 // 获取配置
-app.get('/api/config', (req, res) => {
-  const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
+app.get('/api/config', async (req, res) => {
   try {
-    if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-      // 兼容旧配置格式
-      if (config.token && !config.apiKeys) {
-        config.apiKeys = {};
+    if (db) {
+      const configCollection = db.collection(CONFIG_COLLECTION_NAME);
+      const saved = await configCollection.findOne({ _id: CONFIG_DOC_ID });
+      if (saved) {
+        const { _id, ...configData } = saved;
+        const normalized = normalizeConfig(configData);
+        return res.json(normalized);
       }
-      if (!config.provider) {
-        config.provider = 'libre';
-      }
-      res.json(config);
-    } else {
-      res.json({ 
-        from: 'auto', 
-        to: 'zh', 
-        provider: 'libre',
-        apiKeys: {}
-      });
     }
+
+    const fileConfig = readConfigFromFile();
+    if (fileConfig) {
+      return res.json(fileConfig);
+    }
+    res.json({
+      from: 'auto',
+      to: 'zh',
+      provider: 'libre',
+      apiKeys: {}
+    });
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
 // 保存配置
-app.post('/api/config', (req, res) => {
-  const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
+app.post('/api/config', async (req, res) => {
   try {
-    const config = req.body;
-    fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    const config = normalizeConfig(req.body || {});
+
+    if (db) {
+      const configCollection = db.collection(CONFIG_COLLECTION_NAME);
+      await configCollection.updateOne(
+        { _id: CONFIG_DOC_ID },
+        {
+          $set: {
+            ...config,
+            updatedAt: new Date().toISOString(),
+          },
+          $setOnInsert: {
+            createdAt: new Date().toISOString(),
+          },
+        },
+        { upsert: true }
+      );
+    }
+
+    // 保持与 CLI 的文件配置兼容
+    writeConfigToFile(config);
     res.json({ success: true, message: '配置已保存' });
   } catch (error) {
     res.status(500).json({ error: error.message });
@@ -94,7 +153,8 @@ app.post('/api/preview', async (req, res) => {
     const result = await previewTranslate(text, previewConfig);
     res.json({ success: true, text, result });
   } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    res.status(statusCode).json({ success: false, error: error.message });
   }
 });
 
@@ -111,10 +171,38 @@ app.post('/api/ask', async (req, res) => {
       provider: cfg.provider || 'deepseek',
       apiKeys: cfg.apiKeys || {},
     };
-    const answer = await askAI(question, askConfig);
-    res.json({ success: true, question, answer });
+    let wroteChunk = false;
+    const answer = await askAIStream(question, askConfig, (chunk) => {
+      if (!wroteChunk) {
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('X-Accel-Buffering', 'no');
+        wroteChunk = true;
+      }
+      res.write(chunk);
+    });
+
+    if (!wroteChunk) {
+      res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+      res.write(answer || '');
+    }
+    res.end();
   } catch (error) {
-    res.status(400).json({ success: false, error: error.message });
+    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    console.error(
+      '[API /api/ask] 请求失败:',
+      JSON.stringify({
+        statusCode,
+        provider: req.body?.config?.provider || 'deepseek',
+        questionLength: ((req.body?.question || '').toString().trim()).length,
+        error: error?.message || String(error),
+      })
+    );
+    if (res.headersSent) {
+      res.end();
+      return;
+    }
+    res.status(statusCode).json({ success: false, error: error.message });
   }
 });
 

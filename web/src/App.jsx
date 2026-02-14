@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import axios from 'axios';
+import { NavLink, Navigate, Route, Routes } from 'react-router-dom';
 import './App.css';
 
 const API_BASE = '/api';
@@ -9,9 +10,14 @@ const PROVIDERS = {
   qwen: '通义千问',
   openai: 'ChatGPT',
 };
+const PROVIDER_LINKS = {
+  deepseek: 'https://platform.deepseek.com/',
+  qwen: 'https://bailian.console.aliyun.com/',
+  openai: 'https://platform.openai.com/api-keys',
+};
+const CONFIG_PROVIDER_STORAGE_KEY = 'fanyi-config-provider';
 
 function App() {
-  const [activeTab, setActiveTab] = useState('assistant');
   const [config, setConfig] = useState({
     from: 'auto',
     to: 'zh',
@@ -27,12 +33,18 @@ function App() {
   const [previewText, setPreviewText] = useState('hello');
   const [previewResult, setPreviewResult] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [askProvider, setAskProvider] = useState('deepseek');
+  const [askProvider, setAskProvider] = useState(() => {
+    if (typeof window === 'undefined') {
+      return 'deepseek';
+    }
+    return window.localStorage.getItem('ai-ask-provider') || 'deepseek';
+  });
   const [askQuestion, setAskQuestion] = useState('');
   const [askAnswer, setAskAnswer] = useState('');
   const [askLoading, setAskLoading] = useState(false);
   const [newTokenProvider, setNewTokenProvider] = useState('');
   const [newTokenValue, setNewTokenValue] = useState('');
+  const [tokenVisibility, setTokenVisibility] = useState({});
 
   const AI_PROVIDERS = Object.fromEntries(
     Object.entries(PROVIDERS).filter(([key]) => key !== 'libre')
@@ -63,14 +75,23 @@ function App() {
     try {
       const res = await axios.get(`${API_BASE}/config`);
       const loaded = res.data || {};
+      const savedConfigProvider = typeof window !== 'undefined'
+        ? window.localStorage.getItem(CONFIG_PROVIDER_STORAGE_KEY)
+        : '';
+      const nextConfigProvider = savedConfigProvider && PROVIDERS[savedConfigProvider]
+        ? savedConfigProvider
+        : (loaded.provider || 'libre');
       setConfig({
         from: loaded.from || 'auto',
         to: loaded.to || 'zh',
-        provider: loaded.provider || 'libre',
+        provider: nextConfigProvider,
         token: loaded.token || '',
         apiKeys: loaded.apiKeys || {},
       });
-      if (loaded.provider && loaded.provider !== 'libre') {
+      const savedAskProvider = typeof window !== 'undefined'
+        ? window.localStorage.getItem('ai-ask-provider')
+        : '';
+      if (!savedAskProvider && loaded.provider && loaded.provider !== 'libre') {
         setAskProvider(loaded.provider);
       }
     } catch (error) {
@@ -87,11 +108,14 @@ function App() {
     }
   };
 
-  const saveConfig = async () => {
+  const saveConfig = async (options = {}) => {
+    const { silent = false } = options;
     setLoading(true);
     try {
       await axios.post(`${API_BASE}/config`, config);
-      showMessage('success', '配置已保存');
+      if (!silent) {
+        showMessage('success', '配置已保存');
+      }
     } catch (error) {
       showMessage('error', '保存配置失败: ' + error.message);
     } finally {
@@ -123,6 +147,15 @@ function App() {
   const showMessage = (type, text) => {
     setMessage({ type, text });
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
+  };
+
+  const getFriendlyApiError = (error, action = '请求失败') => {
+    const status = error?.response?.status ?? error?.status;
+    const rawMsg = error?.response?.data?.error || error?.message || `${action}: 未知错误`;
+    if (status === 402 || status === 429) {
+      return 'OpenAI 额度不足或已超限，请到 Billing 检查套餐与余额，或先切换 deepseek/qwen。';
+    }
+    return rawMsg;
   };
 
   const formatDate = (dateString) => {
@@ -158,8 +191,11 @@ function App() {
   const loadPreset = (preset) => {
     if (!preset?.config) return;
     setConfig(preset.config);
+    if (preset.config?.provider && typeof window !== 'undefined') {
+      window.localStorage.setItem(CONFIG_PROVIDER_STORAGE_KEY, preset.config.provider);
+    }
     if (preset.config.provider && preset.config.provider !== 'libre') {
-      setAskProvider(preset.config.provider);
+      handleAskProviderChange(preset.config.provider);
     }
     showMessage('success', `已加载方案：${preset.name}`);
   };
@@ -187,7 +223,7 @@ function App() {
     } catch (error) {
       showMessage(
         'error',
-        error?.response?.data?.error || ('预览失败: ' + error.message)
+        getFriendlyApiError(error, '预览失败')
       );
     } finally {
       setPreviewLoading(false);
@@ -200,22 +236,66 @@ function App() {
       showMessage('error', '请输入问题');
       return;
     }
+    const askToken = (config.apiKeys?.[askProvider] || '').trim();
+    if (!askToken) {
+      const providerLabel = AI_PROVIDERS[askProvider] || askProvider;
+      const guideUrl = PROVIDER_LINKS[askProvider];
+      const guideText = guideUrl ? `，获取地址：${guideUrl}` : '';
+      showMessage('error', `请先在「Token 管理」中配置 ${providerLabel} Token${guideText}`);
+      return;
+    }
     setAskLoading(true);
     setAskAnswer('');
     try {
-      const res = await axios.post(`${API_BASE}/ask`, {
-        question,
-        config: {
-          ...config,
-          provider: askProvider,
+      const response = await fetch(`${API_BASE}/ask`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({
+          question,
+          config: {
+            ...config,
+            provider: askProvider,
+          },
+        }),
       });
-      setAskAnswer(res.data?.answer || '');
+
+      if (!response.ok) {
+        let errorMsg = '';
+        try {
+          const errJson = await response.json();
+          errorMsg = errJson?.error || '';
+        } catch {
+          errorMsg = await response.text();
+        }
+        const apiError = new Error(errorMsg || `问答失败: HTTP ${response.status}`);
+        apiError.status = response.status;
+        throw apiError;
+      }
+
+      const reader = response.body?.getReader();
+      if (!reader) {
+        const text = await response.text();
+        setAskAnswer(text || '');
+        showMessage('success', '回答已生成');
+        return;
+      }
+
+      const decoder = new TextDecoder('utf-8');
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunkText = decoder.decode(value, { stream: true });
+        if (chunkText) {
+          setAskAnswer((prev) => prev + chunkText);
+        }
+      }
       showMessage('success', '回答已生成');
     } catch (error) {
       showMessage(
         'error',
-        error?.response?.data?.error || ('问答失败: ' + error.message)
+        getFriendlyApiError(error, '问答失败')
       );
     } finally {
       setAskLoading(false);
@@ -235,7 +315,7 @@ function App() {
     delete nextApiKeys[provider];
     setConfig({ ...config, apiKeys: nextApiKeys });
     if (askProvider === provider) {
-      setAskProvider('deepseek');
+      handleAskProviderChange('deepseek');
     }
   };
 
@@ -255,6 +335,29 @@ function App() {
     showMessage('success', `已添加 token 入口: ${provider}`);
   };
 
+  const isTokenVisible = (field) => Boolean(tokenVisibility[field]);
+
+  const toggleTokenVisibility = (field) => {
+    setTokenVisibility((prev) => ({
+      ...prev,
+      [field]: !prev[field],
+    }));
+  };
+
+  const handleAskProviderChange = (provider) => {
+    setAskProvider(provider);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem('ai-ask-provider', provider);
+    }
+  };
+
+  const handleConfigProviderChange = (provider) => {
+    setConfig((prev) => ({ ...prev, provider }));
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(CONFIG_PROVIDER_STORAGE_KEY, provider);
+    }
+  };
+
   return (
     <div className="app">
       <div className="container">
@@ -267,36 +370,43 @@ function App() {
           <div className="layout">
             <aside className="sidebar">
               <div className="tabs">
-                <button
-                  className={`tab ${activeTab === 'assistant' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('assistant')}
+                <NavLink
+                  to="/assistant"
+                  className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}
                 >
                   🤖 AI 助手
-                </button>
-                <button
-                  className={`tab ${activeTab === 'config' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('config')}
+                </NavLink>
+                <NavLink
+                  to="/config"
+                  className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}
                 >
                   ⚙️ 翻译配置 (fanyi)
-                </button>
-                <button
-                  className={`tab ${activeTab === 'tokens' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('tokens')}
+                </NavLink>
+                <NavLink
+                  to="/tokens"
+                  className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}
                 >
                   🔑 Token 管理
-                </button>
-                <button
-                  className={`tab ${activeTab === 'history' ? 'active' : ''}`}
-                  onClick={() => setActiveTab('history')}
+                </NavLink>
+                <NavLink
+                  to="/history"
+                  className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}
                 >
                   📜 历史记录 ({history.length})
-                </button>
+                </NavLink>
               </div>
             </aside>
 
             <main className="content-area">
-              {activeTab === 'assistant' && (
-                <div className="assistant-panel">
+              <Routes>
+                <Route
+                  path="/"
+                  element={<Navigate to="/assistant" replace />}
+                />
+                <Route
+                  path="/assistant"
+                  element={(
+                    <div className="assistant-panel">
                   <div className="assistant-head">
                     <h3>AI 问答</h3>
                     <p>这里模拟命令：`ai &lt;你的问题&gt;`</p>
@@ -308,7 +418,7 @@ function App() {
                       <select
                         className="provider-select"
                         value={askProvider}
-                        onChange={(e) => setAskProvider(e.target.value)}
+                        onChange={(e) => handleAskProviderChange(e.target.value)}
                       >
                         {Object.entries(AI_PROVIDERS).map(([key, label]) => (
                           <option key={key} value={key}>
@@ -320,18 +430,30 @@ function App() {
 
                     <div className="form-group token-group">
                       <label>API Token</label>
-                      <input
-                        type="password"
-                        value={config.apiKeys?.[askProvider] || ''}
-                        onChange={(e) => {
-                          const nextApiKeys = {
-                            ...(config.apiKeys || {}),
-                            [askProvider]: e.target.value,
-                          };
-                          setConfig({ ...config, apiKeys: nextApiKeys });
-                        }}
-                        placeholder={`输入 ${AI_PROVIDERS[askProvider]} 的 Token`}
-                      />
+                      <div className="token-input-row">
+                        <input
+                          type={isTokenVisible(`assistant-${askProvider}`) ? 'text' : 'password'}
+                          value={config.apiKeys?.[askProvider] || ''}
+                          onChange={(e) => {
+                            const nextApiKeys = {
+                              ...(config.apiKeys || {}),
+                              [askProvider]: e.target.value,
+                            };
+                            setConfig({ ...config, apiKeys: nextApiKeys });
+                          }}
+                          placeholder={`输入 ${AI_PROVIDERS[askProvider]} 的 Token`}
+                          onBlur={() => saveConfig({ silent: true })}
+                        />
+                        <button
+                          type="button"
+                          className="token-visibility-icon-btn"
+                          onClick={() => toggleTokenVisibility(`assistant-${askProvider}`)}
+                          aria-label={isTokenVisible(`assistant-${askProvider}`) ? '隐藏 token' : '显示 token'}
+                          title={isTokenVisible(`assistant-${askProvider}`) ? '隐藏 token' : '显示 token'}
+                        >
+                          {isTokenVisible(`assistant-${askProvider}`) ? '🙈' : '👁'}
+                        </button>
+                      </div>
                     </div>
                   </div>
 
@@ -360,10 +482,13 @@ function App() {
                     <div className="assistant-answer">{askAnswer || '回答将显示在这里'}</div>
                   </div>
                 </div>
-              )}
+                  )}
+                />
 
-              {activeTab === 'config' && (
-                <div className="config-layout">
+                <Route
+                  path="/config"
+                  element={(
+                    <div className="config-layout">
                   <div className="config-panel">
                     <div className="form-row">
                       <div className="form-group provider-group">
@@ -371,7 +496,7 @@ function App() {
                         <select
                           className="provider-select"
                           value={config.provider || 'libre'}
-                          onChange={(e) => setConfig({ ...config, provider: e.target.value })}
+                          onChange={(e) => handleConfigProviderChange(e.target.value)}
                         >
                           {Object.entries(PROVIDERS).map(([key, label]) => (
                             <option key={key} value={key}>
@@ -383,19 +508,32 @@ function App() {
 
                       <div className="form-group token-group">
                         <label>API Token (可选)</label>
-                        <input
-                          type="password"
-                          value={config.apiKeys?.[config.provider] || config.token || ''}
-                          onChange={(e) => {
-                            const nextApiKeys = {
-                              ...(config.apiKeys || {}),
-                              [config.provider || 'libre']: e.target.value,
-                            };
-                            setConfig({ ...config, token: e.target.value, apiKeys: nextApiKeys });
-                          }}
-                          placeholder={`输入 ${PROVIDERS[config.provider || 'libre']} 的 Token`}
-                          disabled={(config.provider || 'libre') === 'libre'}
-                        />
+                        <div className="token-input-row">
+                          <input
+                            type={isTokenVisible(`config-${config.provider || 'libre'}`) ? 'text' : 'password'}
+                            value={config.apiKeys?.[config.provider] || config.token || ''}
+                            onChange={(e) => {
+                              const nextApiKeys = {
+                                ...(config.apiKeys || {}),
+                                [config.provider || 'libre']: e.target.value,
+                              };
+                              setConfig({ ...config, token: e.target.value, apiKeys: nextApiKeys });
+                            }}
+                            placeholder={`输入 ${PROVIDERS[config.provider || 'libre']} 的 Token`}
+                            disabled={(config.provider || 'libre') === 'libre'}
+                            onBlur={() => saveConfig({ silent: true })}
+                          />
+                          <button
+                            type="button"
+                            className="token-visibility-icon-btn"
+                            onClick={() => toggleTokenVisibility(`config-${config.provider || 'libre'}`)}
+                            disabled={(config.provider || 'libre') === 'libre'}
+                            aria-label={isTokenVisible(`config-${config.provider || 'libre'}`) ? '隐藏 token' : '显示 token'}
+                            title={isTokenVisible(`config-${config.provider || 'libre'}`) ? '隐藏 token' : '显示 token'}
+                          >
+                            {isTokenVisible(`config-${config.provider || 'libre'}`) ? '🙈' : '👁'}
+                          </button>
+                        </div>
                       </div>
                     </div>
 
@@ -488,10 +626,13 @@ function App() {
                     )}
                   </div>
                 </div>
-              )}
+                  )}
+                />
 
-              {activeTab === 'tokens' && (
-                <div className="tokens-panel">
+                <Route
+                  path="/tokens"
+                  element={(
+                    <div className="tokens-panel">
                   <div className="assistant-head">
                     <h3>Token 管理中心</h3>
                     <p>统一管理所有 provider token，新增后可用于 ai / fanyi 命令与页面联调。</p>
@@ -511,13 +652,37 @@ function App() {
                             <div className="token-name">{provider}</div>
                             <div className="token-desc">{AI_PROVIDERS[provider]}</div>
                           </div>
-                          <input
-                            type="password"
-                            className="token-input"
-                            value={config.apiKeys?.[provider] || ''}
-                            onChange={(e) => updateApiKey(provider, e.target.value)}
-                            placeholder={`输入 ${AI_PROVIDERS[provider]} Token`}
-                          />
+                          <div className="token-input-wrap">
+                            <div className="token-input-row">
+                              <input
+                                type={isTokenVisible(`builtin-${provider}`) ? 'text' : 'password'}
+                                className="token-input"
+                                value={config.apiKeys?.[provider] || ''}
+                                onChange={(e) => updateApiKey(provider, e.target.value)}
+                                placeholder={`输入 ${AI_PROVIDERS[provider]} Token`}
+                                onBlur={() => saveConfig({ silent: true })}
+                              />
+                              <button
+                                type="button"
+                                className="token-visibility-icon-btn"
+                                onClick={() => toggleTokenVisibility(`builtin-${provider}`)}
+                                aria-label={isTokenVisible(`builtin-${provider}`) ? '隐藏 token' : '显示 token'}
+                                title={isTokenVisible(`builtin-${provider}`) ? '隐藏 token' : '显示 token'}
+                              >
+                                {isTokenVisible(`builtin-${provider}`) ? '🙈' : '👁'}
+                              </button>
+                            </div>
+                            {PROVIDER_LINKS[provider] ? (
+                              <a
+                                className="token-link"
+                                href={PROVIDER_LINKS[provider]}
+                                target="_blank"
+                                rel="noreferrer"
+                              >
+                                官网: {PROVIDER_LINKS[provider]}
+                              </a>
+                            ) : null}
+                          </div>
                         </div>
                       ))}
                     </div>
@@ -535,13 +700,27 @@ function App() {
                               <div className="token-name">{provider}</div>
                               <div className="token-desc">自定义 provider</div>
                             </div>
-                            <input
-                              type="password"
-                              className="token-input"
-                              value={token || ''}
-                              onChange={(e) => updateApiKey(provider, e.target.value)}
-                              placeholder={`输入 ${provider} Token`}
-                            />
+                            <div className="token-input-wrap">
+                              <div className="token-input-row">
+                                <input
+                                  type={isTokenVisible(`custom-${provider}`) ? 'text' : 'password'}
+                                  className="token-input"
+                                  value={token || ''}
+                                  onChange={(e) => updateApiKey(provider, e.target.value)}
+                                  placeholder={`输入 ${provider} Token`}
+                                  onBlur={() => saveConfig({ silent: true })}
+                                />
+                                <button
+                                  type="button"
+                                  className="token-visibility-icon-btn"
+                                  onClick={() => toggleTokenVisibility(`custom-${provider}`)}
+                                  aria-label={isTokenVisible(`custom-${provider}`) ? '隐藏 token' : '显示 token'}
+                                  title={isTokenVisible(`custom-${provider}`) ? '隐藏 token' : '显示 token'}
+                                >
+                                  {isTokenVisible(`custom-${provider}`) ? '🙈' : '👁'}
+                                </button>
+                              </div>
+                            </div>
                             <button className="token-remove-btn" onClick={() => removeApiKey(provider)}>
                               删除
                             </button>
@@ -560,13 +739,26 @@ function App() {
                         onChange={(e) => setNewTokenProvider(e.target.value)}
                         placeholder="provider 名称（如 claude / kimi）"
                       />
-                      <input
-                        type="password"
-                        className="token-input"
-                        value={newTokenValue}
-                        onChange={(e) => setNewTokenValue(e.target.value)}
-                        placeholder="token（可先留空，后续再填）"
-                      />
+                      <div className="token-input-wrap">
+                        <div className="token-input-row">
+                          <input
+                            type={isTokenVisible('new-custom-token') ? 'text' : 'password'}
+                            className="token-input"
+                            value={newTokenValue}
+                            onChange={(e) => setNewTokenValue(e.target.value)}
+                            placeholder="token（可先留空，后续再填）"
+                          />
+                          <button
+                            type="button"
+                            className="token-visibility-icon-btn"
+                            onClick={() => toggleTokenVisibility('new-custom-token')}
+                            aria-label={isTokenVisible('new-custom-token') ? '隐藏 token' : '显示 token'}
+                            title={isTokenVisible('new-custom-token') ? '隐藏 token' : '显示 token'}
+                          >
+                            {isTokenVisible('new-custom-token') ? '🙈' : '👁'}
+                          </button>
+                        </div>
+                      </div>
                       <button className="preview-btn" onClick={addCustomToken}>
                         添加入口
                       </button>
@@ -577,10 +769,13 @@ function App() {
                     {loading ? '保存中...' : '💾 保存 Token 配置'}
                   </button>
                 </div>
-              )}
+                  )}
+                />
 
-              {activeTab === 'history' && (
-                <div className="history-panel">
+                <Route
+                  path="/history"
+                  element={(
+                    <div className="history-panel">
                   {history.length === 0 ? (
                     <div className="empty-state">暂无历史记录</div>
                   ) : (
@@ -617,7 +812,13 @@ function App() {
                     </>
                   )}
                 </div>
-              )}
+                  )}
+                />
+                <Route
+                  path="*"
+                  element={<Navigate to="/assistant" replace />}
+                />
+              </Routes>
             </main>
           </div>
         </div>
