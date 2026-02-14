@@ -21,7 +21,7 @@ npm run web
 
 **方式2: 使用命令行（需要先全局安装）**
 ```bash
-fanyi web
+ai web
 ```
 
 ### 3. 访问Web界面

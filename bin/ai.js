@@ -5,7 +5,7 @@ import path from 'path';
 import { ask } from '../src/providers.js';
 
 const program = new Command();
-const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.fanyi-config.json');
+const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
 
 const DEFAULT_CONFIG = {
   from: 'auto',

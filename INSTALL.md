@@ -28,15 +28,15 @@ sudo npm install -g .
 
 ```bash
 # 添加到 ~/.zshrc
-echo 'alias fanyi="node /Users/wang90/ai-cmd/bin/fanyi.js"' >> ~/.zshrc
+echo 'alias ai="node /Users/wang90/ai-cmd/bin/ai.js"' >> ~/.zshrc
 source ~/.zshrc
 ```
 
 ## 方式4: 直接使用 node 运行
 
 ```bash
-node /Users/wang90/ai-cmd/bin/fanyi.js hello
-node /Users/wang90/ai-cmd/bin/fanyi.js web
+node /Users/wang90/ai-cmd/bin/ai.js "你好，介绍一下自己"
+node /Users/wang90/ai-cmd/bin/ai.js web
 ```
 
 ## 验证安装
@@ -44,15 +44,15 @@ node /Users/wang90/ai-cmd/bin/fanyi.js web
 安装后运行：
 
 ```bash
-fanyi -v
-fanyi -h
+ai -v
+ai -h
 ```
 
 如果显示版本和帮助信息，说明安装成功。
 
 ## 使用 npm scripts（开发推荐）
 
-即使没有全局安装 `fanyi` 命令，也可以使用 npm scripts：
+即使没有全局安装 `ai` 命令，也可以使用 npm scripts：
 
 ```bash
 # 启动Web界面

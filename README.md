@@ -87,7 +87,7 @@ fanyi web
 - 内置 token：`deepseek`、`qwen`、`openai`
 - 自定义 token：例如 `claude`、`kimi`（先建入口，后续可接入）
 
-保存后写入同一份配置文件：`~/.fanyi-config.json`
+保存后写入同一份配置文件：`~/.ai-config.json`
 
 ### 方式 2：环境变量
 
@@ -99,7 +99,7 @@ export OPENAI_API_KEY="your-openai-api-key"
 
 ### 方式 3：直接编辑配置文件
 
-`~/.fanyi-config.json` 示例：
+`~/.ai-config.json` 示例：
 
 ```json
 {

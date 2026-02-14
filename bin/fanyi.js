@@ -5,7 +5,7 @@ import fs from 'fs';
 import path from 'path';
 
 const program = new Command();
-const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.fanyi-config.json');
+const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
 
 // 语言代码映射
 const LANGUAGES = {

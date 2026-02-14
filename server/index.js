@@ -43,7 +43,7 @@ app.use(express.json());
 
 // 获取配置
 app.get('/api/config', (req, res) => {
-  const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.fanyi-config.json');
+  const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
   try {
     if (fs.existsSync(configPath)) {
       const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
@@ -70,7 +70,7 @@ app.get('/api/config', (req, res) => {
 
 // 保存配置
 app.post('/api/config', (req, res) => {
-  const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.fanyi-config.json');
+  const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
   try {
     const config = req.body;
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
@@ -120,7 +120,7 @@ app.post('/api/ask', async (req, res) => {
 
 // 获取配置方案列表
 app.get('/api/config-presets', (req, res) => {
-  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.fanyi-presets.json');
+  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-presets.json');
   try {
     if (fs.existsSync(presetsPath)) {
       const presets = JSON.parse(fs.readFileSync(presetsPath, 'utf-8'));
@@ -137,7 +137,7 @@ app.get('/api/config-presets', (req, res) => {
 
 // 保存配置方案
 app.post('/api/config-presets', (req, res) => {
-  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.fanyi-presets.json');
+  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-presets.json');
   try {
     let presets = [];
     if (fs.existsSync(presetsPath)) {
@@ -176,7 +176,7 @@ app.post('/api/config-presets', (req, res) => {
 
 // 删除配置方案
 app.delete('/api/config-presets/:name', (req, res) => {
-  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.fanyi-presets.json');
+  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-presets.json');
   try {
     if (!fs.existsSync(presetsPath)) {
       return res.json({ success: true, presets: [] });

@@ -68,7 +68,7 @@ sudo systemctl start mongodb
 
 **方式1: 使用命令行**
 ```bash
-fanyi web
+ai web
 ```
 
 **方式2: 使用 npm scripts（推荐用于开发）**
@@ -142,4 +142,4 @@ ai-cmd/
 - MongoDB必须运行才能保存历史记录
 - 如果MongoDB未运行，翻译功能仍然可用，但不会保存历史
 - Web界面需要先构建（`npm run build`）才能访问
-- 配置文件保存在 `~/.fanyi-config.json`
+- 配置文件保存在 `~/.ai-config.json`

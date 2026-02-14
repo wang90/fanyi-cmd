@@ -12,7 +12,7 @@
     "web": "node server/index.js",
     "start": "node server/index.js",
     "start:web": "node server/index.js",
-    "config": "node bin/fanyi.js config",
+    "config": "node bin/ai.js config",
     "build": "cd web && npm run build",
     "build:web": "cd web && npm run build",
     "dev:web": "cd web && npm run dev",
