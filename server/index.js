@@ -20,6 +20,45 @@ const DB_NAME = 'ai-cmd';
 const COLLECTION_NAME = 'history';
 const CONFIG_COLLECTION_NAME = 'config';
 const CONFIG_DOC_ID = 'default';
+const PROJECT_ROOT = path.resolve(__dirname, '..');
+
+function getDocTitle(relativePath) {
+  const filename = path.basename(relativePath, '.md');
+  return filename.replace(/[-_]/g, ' ');
+}
+
+function collectMarkdownDocs() {
+  const roots = [
+    { absDir: PROJECT_ROOT, scope: 'root' },
+    { absDir: path.join(PROJECT_ROOT, 'docs'), scope: 'docs' },
+  ];
+  const docs = [];
+  const seen = new Set();
+
+  for (const root of roots) {
+    if (!fs.existsSync(root.absDir)) continue;
+    const entries = fs.readdirSync(root.absDir, { withFileTypes: true });
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.md')) continue;
+      const absPath = path.join(root.absDir, entry.name);
+      const relativePath = path.relative(PROJECT_ROOT, absPath).replace(/\\/g, '/');
+      if (seen.has(relativePath)) continue;
+      seen.add(relativePath);
+      docs.push({
+        path: relativePath,
+        title: getDocTitle(relativePath),
+        scope: root.scope,
+      });
+    }
+  }
+
+  docs.sort((a, b) => {
+    if (a.path === 'README.md') return -1;
+    if (b.path === 'README.md') return 1;
+    return a.path.localeCompare(b.path);
+  });
+  return docs;
+}
 
 function getConfigPath() {
   return path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
@@ -45,6 +84,23 @@ function normalizeConfig(config = {}) {
   return normalized;
 }
 
+function sanitizeConfigForClient(config = {}) {
+  const normalized = normalizeConfig(config);
+  const tokenEntries = Object.entries(normalized.apiKeys || {});
+  const tokenProviders = tokenEntries.map(([provider]) => provider);
+  const tokenConfigured = Object.fromEntries(
+    tokenEntries.map(([provider, value]) => [provider, Boolean((value || '').toString().trim())])
+  );
+
+  return {
+    from: normalized.from,
+    to: normalized.to,
+    provider: normalized.provider,
+    tokenProviders,
+    tokenConfigured,
+  };
+}
+
 function readConfigFromFile() {
   const configPath = getConfigPath();
   if (!fs.existsSync(configPath)) {
@@ -57,6 +113,55 @@ function readConfigFromFile() {
 function writeConfigToFile(config) {
   const configPath = getConfigPath();
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+}
+
+async function loadPersistedConfig() {
+  if (db) {
+    try {
+      const configCollection = db.collection(CONFIG_COLLECTION_NAME);
+      const saved = await configCollection.findOne({ _id: CONFIG_DOC_ID });
+      if (saved) {
+        const { _id, ...configData } = saved;
+        return normalizeConfig(configData);
+      }
+    } catch (error) {
+      // MongoDB配置读取失败时回退到文件配置
+    }
+  }
+
+  const fileConfig = readConfigFromFile();
+  if (fileConfig) {
+    return fileConfig;
+  }
+
+  return normalizeConfig({
+    from: 'auto',
+    to: 'zh',
+    provider: 'libre',
+    apiKeys: {},
+  });
+}
+
+async function persistConfig(config) {
+  if (db) {
+    const configCollection = db.collection(CONFIG_COLLECTION_NAME);
+    await configCollection.updateOne(
+      { _id: CONFIG_DOC_ID },
+      {
+        $set: {
+          ...config,
+          updatedAt: new Date().toISOString(),
+        },
+        $setOnInsert: {
+          createdAt: new Date().toISOString(),
+        },
+      },
+      { upsert: true }
+    );
+  }
+
+  // 保持与 CLI 的文件配置兼容
+  writeConfigToFile(config);
 }
 
 async function connectDB() {
@@ -85,26 +190,8 @@ app.use(express.json());
 // 获取配置
 app.get('/api/config', async (req, res) => {
   try {
-    if (db) {
-      const configCollection = db.collection(CONFIG_COLLECTION_NAME);
-      const saved = await configCollection.findOne({ _id: CONFIG_DOC_ID });
-      if (saved) {
-        const { _id, ...configData } = saved;
-        const normalized = normalizeConfig(configData);
-        return res.json(normalized);
-      }
-    }
-
-    const fileConfig = readConfigFromFile();
-    if (fileConfig) {
-      return res.json(fileConfig);
-    }
-    res.json({
-      from: 'auto',
-      to: 'zh',
-      provider: 'libre',
-      apiKeys: {}
-    });
+    const config = await loadPersistedConfig();
+    res.json(sanitizeConfigForClient(config));
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
@@ -113,30 +200,108 @@ app.get('/api/config', async (req, res) => {
 // 保存配置
 app.post('/api/config', async (req, res) => {
   try {
-    const config = normalizeConfig(req.body || {});
-
-    if (db) {
-      const configCollection = db.collection(CONFIG_COLLECTION_NAME);
-      await configCollection.updateOne(
-        { _id: CONFIG_DOC_ID },
-        {
-          $set: {
-            ...config,
-            updatedAt: new Date().toISOString(),
-          },
-          $setOnInsert: {
-            createdAt: new Date().toISOString(),
-          },
-        },
-        { upsert: true }
-      );
-    }
-
-    // 保持与 CLI 的文件配置兼容
-    writeConfigToFile(config);
+    const persistedConfig = await loadPersistedConfig();
+    const body = req.body || {};
+    const nextConfig = normalizeConfig({
+      ...persistedConfig,
+      ...body,
+      // token 统一走专用接口，普通配置保存不覆盖现有 token
+      apiKeys: persistedConfig.apiKeys || {},
+    });
+    await persistConfig(nextConfig);
     res.json({ success: true, message: '配置已保存' });
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+// 按 provider 获取 token（按需读取）
+app.get('/api/token/:provider', async (req, res) => {
+  try {
+    const provider = decodeURIComponent((req.params?.provider || '').toString().trim().toLowerCase());
+    if (!provider) {
+      return res.status(400).json({ success: false, error: 'provider 不能为空' });
+    }
+
+    const persistedConfig = await loadPersistedConfig();
+    const token = (persistedConfig.apiKeys?.[provider] || '').toString();
+    res.json({
+      success: true,
+      provider,
+      token,
+      configured: Boolean(token.trim()),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 按 provider 保存 token
+app.post('/api/token/:provider', async (req, res) => {
+  try {
+    const provider = decodeURIComponent((req.params?.provider || '').toString().trim().toLowerCase());
+    if (!provider) {
+      return res.status(400).json({ success: false, error: 'provider 不能为空' });
+    }
+
+    const token = (req.body?.token || '').toString();
+    const persistedConfig = await loadPersistedConfig();
+    const nextApiKeys = {
+      ...(persistedConfig.apiKeys || {}),
+      [provider]: token,
+    };
+    const nextConfig = normalizeConfig({
+      ...persistedConfig,
+      apiKeys: nextApiKeys,
+    });
+
+    await persistConfig(nextConfig);
+    res.json({
+      success: true,
+      provider,
+      configured: Boolean(token.trim()),
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 文档列表
+app.get('/api/docs', (req, res) => {
+  try {
+    const docs = collectMarkdownDocs();
+    res.json({ success: true, docs });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// 文档内容
+app.get('/api/docs/content', (req, res) => {
+  try {
+    const docPath = (req.query?.path || '').toString().trim();
+    if (!docPath) {
+      return res.status(400).json({ success: false, error: 'path 不能为空' });
+    }
+
+    const docs = collectMarkdownDocs();
+    const matched = docs.find((item) => item.path === docPath);
+    if (!matched) {
+      return res.status(404).json({ success: false, error: '文档不存在或不可访问' });
+    }
+
+    const absPath = path.join(PROJECT_ROOT, matched.path);
+    const content = fs.readFileSync(absPath, 'utf-8');
+    res.json({
+      success: true,
+      doc: {
+        path: matched.path,
+        title: matched.title,
+        content,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 
@@ -144,12 +309,14 @@ app.post('/api/config', async (req, res) => {
 app.post('/api/preview', async (req, res) => {
   try {
     const text = (req.body?.text || 'hello').toString();
-    const cfg = req.body?.config || {};
+    const cfg = req.body || {};
+    const persistedConfig = await loadPersistedConfig();
     const previewConfig = {
-      provider: cfg.provider || 'libre',
-      from: cfg.from || 'auto',
-      to: cfg.to || 'zh',
-      apiKeys: cfg.apiKeys || {},
+      provider: cfg.provider || persistedConfig.provider || 'libre',
+      from: cfg.from || persistedConfig.from || 'auto',
+      to: cfg.to || persistedConfig.to || 'zh',
+      // token 仅从后端持久化配置读取，不信任前端传入
+      apiKeys: persistedConfig.apiKeys || {},
     };
     const result = await previewTranslate(text, previewConfig);
     res.json({ success: true, text, result });
@@ -167,10 +334,12 @@ app.post('/api/ask', async (req, res) => {
       return res.status(400).json({ success: false, error: '问题不能为空' });
     }
 
-    const cfg = req.body?.config || {};
+    const cfg = req.body || {};
+    const persistedConfig = await loadPersistedConfig();
     const askConfig = {
-      provider: cfg.provider || 'deepseek',
-      apiKeys: cfg.apiKeys || {},
+      provider: cfg.provider || persistedConfig.provider || 'deepseek',
+      // token 仅从后端持久化配置读取，不信任前端传入
+      apiKeys: persistedConfig.apiKeys || {},
     };
     let wroteChunk = false;
     const answer = await askAIStream(question, askConfig, (chunk) => {

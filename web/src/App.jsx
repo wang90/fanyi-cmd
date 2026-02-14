@@ -1,6 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import axios from 'axios';
 import { NavLink, Navigate, Route, Routes, useLocation } from 'react-router-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import './App.css';
 
 const API_BASE = '/api';
@@ -23,9 +25,12 @@ function App() {
     from: 'auto',
     to: 'zh',
     provider: 'libre',
-    token: '',
-    apiKeys: {},
   });
+  const [tokenProviders, setTokenProviders] = useState([]);
+  const [tokenConfigured, setTokenConfigured] = useState({});
+  const [tokenValues, setTokenValues] = useState({});
+  const [tokenEditable, setTokenEditable] = useState({});
+  const [tokenEditBaseline, setTokenEditBaseline] = useState({});
   const [history, setHistory] = useState([]);
   const [historyFilter, setHistoryFilter] = useState('all');
   const [loading, setLoading] = useState(false);
@@ -46,14 +51,19 @@ function App() {
   const [askLoading, setAskLoading] = useState(false);
   const [newTokenProvider, setNewTokenProvider] = useState('');
   const [newTokenValue, setNewTokenValue] = useState('');
-  const [tokenVisibility, setTokenVisibility] = useState({});
+  const [tokenLoading, setTokenLoading] = useState({});
+  const [docFiles, setDocFiles] = useState([]);
+  const [selectedDocPath, setSelectedDocPath] = useState('');
+  const [docContent, setDocContent] = useState('');
+  const [docLoading, setDocLoading] = useState(false);
+  const tokenInputRefs = useRef({});
 
   const AI_PROVIDERS = Object.fromEntries(
     Object.entries(PROVIDERS).filter(([key]) => key !== 'libre')
   );
   const BUILTIN_TOKEN_KEYS = Object.keys(AI_PROVIDERS);
-  const customTokenEntries = Object.entries(config.apiKeys || {}).filter(
-    ([key]) => !BUILTIN_TOKEN_KEYS.includes(key)
+  const customTokenProviders = tokenProviders.filter(
+    (provider) => !BUILTIN_TOKEN_KEYS.includes(provider)
   );
   const LANG_OPTIONS = [
     ['auto', '自动检测'],
@@ -92,9 +102,13 @@ function App() {
         from: loaded.from || 'auto',
         to: loaded.to || 'zh',
         provider: nextConfigProvider,
-        token: loaded.token || '',
-        apiKeys: loaded.apiKeys || {},
       });
+      setTokenProviders(Array.isArray(loaded.tokenProviders) ? loaded.tokenProviders : []);
+      setTokenConfigured(
+        loaded.tokenConfigured && typeof loaded.tokenConfigured === 'object'
+          ? loaded.tokenConfigured
+          : {}
+      );
       const savedAskProvider = typeof window !== 'undefined'
         ? window.localStorage.getItem('ai-ask-provider')
         : '';
@@ -126,6 +140,9 @@ function App() {
   useEffect(() => {
     if (location.pathname === '/history') {
       loadHistory();
+    }
+    if (location.pathname === '/docs') {
+      loadDocs();
     }
   }, [location.pathname]);
 
@@ -245,13 +262,144 @@ function App() {
     }
   };
 
+  const loadDocContent = async (docPath) => {
+    if (!docPath) return;
+    setDocLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/docs/content`, {
+        params: { path: docPath },
+      });
+      setSelectedDocPath(docPath);
+      setDocContent(res.data?.doc?.content || '');
+    } catch (error) {
+      showMessage('error', '加载文档内容失败: ' + error.message);
+      setDocContent('');
+    } finally {
+      setDocLoading(false);
+    }
+  };
+
+  const loadDocs = async () => {
+    try {
+      const res = await axios.get(`${API_BASE}/docs`);
+      const docs = Array.isArray(res.data?.docs) ? res.data.docs : [];
+      setDocFiles(docs);
+      if (docs.length === 0) {
+        setSelectedDocPath('');
+        setDocContent('');
+        return;
+      }
+      const nextPath = selectedDocPath && docs.some((item) => item.path === selectedDocPath)
+        ? selectedDocPath
+        : (docs.find((item) => item.path === 'README.md')?.path || docs[0].path);
+      await loadDocContent(nextPath);
+    } catch (error) {
+      showMessage('error', '加载文档列表失败: ' + error.message);
+      setDocFiles([]);
+      setSelectedDocPath('');
+      setDocContent('');
+    }
+  };
+
+  const fetchTokenByProvider = async (provider) => {
+    if (!provider) return '';
+    setTokenLoading((prev) => ({ ...prev, [provider]: true }));
+    try {
+      const res = await axios.get(`${API_BASE}/token/${encodeURIComponent(provider)}`);
+      const token = (res.data?.token || '').toString();
+      setTokenValues((prev) => ({ ...prev, [provider]: token }));
+      setTokenConfigured((prev) => ({ ...prev, [provider]: Boolean(token.trim()) }));
+      setTokenProviders((prev) => (prev.includes(provider) ? prev : [...prev, provider]));
+      return token;
+    } catch (error) {
+      showMessage('error', '获取 token 失败: ' + error.message);
+      return '';
+    } finally {
+      setTokenLoading((prev) => ({ ...prev, [provider]: false }));
+    }
+  };
+
+  const saveTokenByProvider = async (provider) => {
+    if (!provider) return false;
+    setTokenLoading((prev) => ({ ...prev, [provider]: true }));
+    try {
+      const token = (tokenValues[provider] || '').toString();
+      const res = await axios.post(`${API_BASE}/token/${encodeURIComponent(provider)}`, { token });
+      const configured = Boolean(token.trim());
+      setTokenConfigured((prev) => ({ ...prev, [provider]: configured }));
+      setTokenProviders((prev) => (prev.includes(provider) ? prev : [...prev, provider]));
+      if (res?.data?.success) {
+        showMessage('success', configured ? `${provider} token 已保存` : `${provider} token 已清空`);
+      }
+      return true;
+    } catch (error) {
+      showMessage('error', '保存 token 失败: ' + error.message);
+      return false;
+    } finally {
+      setTokenLoading((prev) => ({ ...prev, [provider]: false }));
+    }
+  };
+
+  const setTokenValue = (provider, value) => {
+    setTokenValues((prev) => ({ ...prev, [provider]: value }));
+    setTokenConfigured((prev) => ({ ...prev, [provider]: Boolean((value || '').trim()) }));
+    setTokenProviders((prev) => (prev.includes(provider) ? prev : [...prev, provider]));
+  };
+
+  const handleTokenEditAction = async (field, provider) => {
+    if (!provider) return;
+    const isEditing = Boolean(tokenEditable[field]);
+    if (isEditing) {
+      const currentToken = (tokenValues[provider] || '').toString();
+      const baselineToken = (tokenEditBaseline[provider] || '').toString();
+      if (currentToken === baselineToken) {
+        setTokenEditable((prev) => ({ ...prev, [field]: false }));
+        return;
+      }
+      const ok = await saveTokenByProvider(provider);
+      if (ok) {
+        setTokenEditable((prev) => ({ ...prev, [field]: false }));
+        setTokenEditBaseline((prev) => ({ ...prev, [provider]: currentToken }));
+      }
+      return;
+    }
+
+    const fetchedToken = await fetchTokenByProvider(provider);
+    setTokenEditBaseline((prev) => ({ ...prev, [provider]: (fetchedToken || '').toString() }));
+    setTokenEditable((prev) => ({ ...prev, [field]: true }));
+    if (typeof window !== 'undefined') {
+      window.requestAnimationFrame(() => {
+        const input = tokenInputRefs.current[field];
+        if (!input) return;
+        input.focus();
+        if (typeof input.setSelectionRange === 'function') {
+          const end = (input.value || '').length;
+          input.setSelectionRange(end, end);
+        }
+      });
+    }
+  };
+
+  const removeApiKey = async (provider) => {
+    setTokenValue(provider, '');
+    const ok = await saveTokenByProvider(provider);
+    if (!ok) return;
+    setTokenValues((prev) => ({ ...prev, [provider]: '' }));
+    setTokenConfigured((prev) => ({ ...prev, [provider]: false }));
+    if (askProvider === provider) {
+      handleAskProviderChange('deepseek');
+    }
+  };
+
   const runPreview = async () => {
     setPreviewLoading(true);
     setPreviewResult('');
     try {
       const res = await axios.post(`${API_BASE}/preview`, {
         text: previewText || 'hello',
-        config,
+        provider: config.provider,
+        from: config.from,
+        to: config.to,
       });
       setPreviewResult(res.data?.result || '');
       showMessage('success', '预览完成');
@@ -271,14 +419,6 @@ function App() {
       showMessage('error', '请输入问题');
       return;
     }
-    const askToken = (config.apiKeys?.[askProvider] || '').trim();
-    if (!askToken) {
-      const providerLabel = AI_PROVIDERS[askProvider] || askProvider;
-      const guideUrl = PROVIDER_LINKS[askProvider];
-      const guideText = guideUrl ? `，获取地址：${guideUrl}` : '';
-      showMessage('error', `请先在「Token 管理」中配置 ${providerLabel} Token${guideText}`);
-      return;
-    }
     setAskLoading(true);
     setAskAnswer('');
     try {
@@ -289,10 +429,7 @@ function App() {
         },
         body: JSON.stringify({
           question,
-          config: {
-            ...config,
-            provider: askProvider,
-          },
+          provider: askProvider,
         }),
       });
 
@@ -337,23 +474,6 @@ function App() {
     }
   };
 
-  const updateApiKey = (provider, value) => {
-    const nextApiKeys = {
-      ...(config.apiKeys || {}),
-      [provider]: value,
-    };
-    setConfig({ ...config, apiKeys: nextApiKeys });
-  };
-
-  const removeApiKey = (provider) => {
-    const nextApiKeys = { ...(config.apiKeys || {}) };
-    delete nextApiKeys[provider];
-    setConfig({ ...config, apiKeys: nextApiKeys });
-    if (askProvider === provider) {
-      handleAskProviderChange('deepseek');
-    }
-  };
-
   const addCustomToken = () => {
     const provider = newTokenProvider.trim().toLowerCase();
     if (!provider) {
@@ -364,19 +484,22 @@ function App() {
       showMessage('error', 'libre 不需要 token');
       return;
     }
-    updateApiKey(provider, newTokenValue.trim());
+    setTokenValue(provider, newTokenValue.trim());
     setNewTokenProvider('');
     setNewTokenValue('');
-    showMessage('success', `已添加 token 入口: ${provider}`);
+    showMessage('success', `已添加 token 入口: ${provider}，请点击编辑后保存`);
   };
 
-  const isTokenVisible = (field) => Boolean(tokenVisibility[field]);
-
-  const toggleTokenVisibility = (field) => {
-    setTokenVisibility((prev) => ({
-      ...prev,
-      [field]: !prev[field],
-    }));
+  const isTokenEditable = (field) => Boolean(tokenEditable[field]);
+  const isTokenLoading = (provider) => Boolean(tokenLoading[provider]);
+  const getTokenInputType = (field) => (isTokenEditable(field) ? 'text' : 'password');
+  const getTokenDisplayValue = (provider, field) => {
+    const raw = tokenValues[provider];
+    if (typeof raw === 'string' && raw.length > 0) {
+      return raw;
+    }
+    const shouldMask = tokenConfigured[provider] && !isTokenEditable(field);
+    return shouldMask ? '****************' : '';
   };
 
   const handleAskProviderChange = (provider) => {
@@ -429,6 +552,12 @@ function App() {
                 >
                   📜 历史记录
                 </NavLink>
+                <NavLink
+                  to="/docs"
+                  className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}
+                >
+                  📚 文档中心
+                </NavLink>
               </div>
             </aside>
 
@@ -467,26 +596,24 @@ function App() {
                       <label>API Token</label>
                       <div className="token-input-row">
                         <input
-                          type={isTokenVisible(`assistant-${askProvider}`) ? 'text' : 'password'}
-                          value={config.apiKeys?.[askProvider] || ''}
-                          onChange={(e) => {
-                            const nextApiKeys = {
-                              ...(config.apiKeys || {}),
-                              [askProvider]: e.target.value,
-                            };
-                            setConfig({ ...config, apiKeys: nextApiKeys });
+                          ref={(node) => {
+                            tokenInputRefs.current[`assistant-${askProvider}`] = node;
                           }}
+                          type={getTokenInputType(`assistant-${askProvider}`)}
+                          value={getTokenDisplayValue(askProvider, `assistant-${askProvider}`)}
+                          onChange={(e) => setTokenValue(askProvider, e.target.value)}
                           placeholder={`输入 ${AI_PROVIDERS[askProvider]} 的 Token`}
-                          onBlur={() => saveConfig({ silent: true })}
+                          readOnly={!isTokenEditable(`assistant-${askProvider}`)}
                         />
                         <button
                           type="button"
                           className="token-visibility-icon-btn"
-                          onClick={() => toggleTokenVisibility(`assistant-${askProvider}`)}
-                          aria-label={isTokenVisible(`assistant-${askProvider}`) ? '隐藏 token' : '显示 token'}
-                          title={isTokenVisible(`assistant-${askProvider}`) ? '隐藏 token' : '显示 token'}
+                          onClick={() => handleTokenEditAction(`assistant-${askProvider}`, askProvider)}
+                          disabled={isTokenLoading(askProvider)}
+                          aria-label={isTokenEditable(`assistant-${askProvider}`) ? '保存 token' : '编辑 token'}
+                          title={isTokenEditable(`assistant-${askProvider}`) ? '保存 token' : '编辑 token'}
                         >
-                          {isTokenVisible(`assistant-${askProvider}`) ? '🙈' : '👁'}
+                          {isTokenEditable(`assistant-${askProvider}`) ? '💾' : '✏️'}
                         </button>
                       </div>
                     </div>
@@ -545,28 +672,29 @@ function App() {
                         <label>API Token (可选)</label>
                         <div className="token-input-row">
                           <input
-                            type={isTokenVisible(`config-${config.provider || 'libre'}`) ? 'text' : 'password'}
-                            value={config.apiKeys?.[config.provider] || config.token || ''}
-                            onChange={(e) => {
-                              const nextApiKeys = {
-                                ...(config.apiKeys || {}),
-                                [config.provider || 'libre']: e.target.value,
-                              };
-                              setConfig({ ...config, token: e.target.value, apiKeys: nextApiKeys });
+                            ref={(node) => {
+                              tokenInputRefs.current[`config-${config.provider || 'libre'}`] = node;
                             }}
+                            type={getTokenInputType(`config-${config.provider || 'libre'}`)}
+                            value={getTokenDisplayValue(config.provider || 'libre', `config-${config.provider || 'libre'}`)}
+                            onChange={(e) => setTokenValue(config.provider || 'libre', e.target.value)}
                             placeholder={`输入 ${PROVIDERS[config.provider || 'libre']} 的 Token`}
                             disabled={(config.provider || 'libre') === 'libre'}
-                            onBlur={() => saveConfig({ silent: true })}
+                            readOnly={
+                              (config.provider || 'libre') === 'libre'
+                                ? true
+                                : !isTokenEditable(`config-${config.provider || 'libre'}`)
+                            }
                           />
                           <button
                             type="button"
                             className="token-visibility-icon-btn"
-                            onClick={() => toggleTokenVisibility(`config-${config.provider || 'libre'}`)}
-                            disabled={(config.provider || 'libre') === 'libre'}
-                            aria-label={isTokenVisible(`config-${config.provider || 'libre'}`) ? '隐藏 token' : '显示 token'}
-                            title={isTokenVisible(`config-${config.provider || 'libre'}`) ? '隐藏 token' : '显示 token'}
+                            onClick={() => handleTokenEditAction(`config-${config.provider || 'libre'}`, config.provider || 'libre')}
+                            disabled={(config.provider || 'libre') === 'libre' || isTokenLoading(config.provider || 'libre')}
+                            aria-label={isTokenEditable(`config-${config.provider || 'libre'}`) ? '保存 token' : '编辑 token'}
+                            title={isTokenEditable(`config-${config.provider || 'libre'}`) ? '保存 token' : '编辑 token'}
                           >
-                            {isTokenVisible(`config-${config.provider || 'libre'}`) ? '🙈' : '👁'}
+                            {isTokenEditable(`config-${config.provider || 'libre'}`) ? '💾' : '✏️'}
                           </button>
                         </div>
                       </div>
@@ -675,7 +803,7 @@ function App() {
 
                   <div className="token-summary">
                     <span>内置入口 {BUILTIN_TOKEN_KEYS.length} 个</span>
-                    <span>自定义入口 {customTokenEntries.length} 个</span>
+                    <span>自定义入口 {customTokenProviders.length} 个</span>
                   </div>
 
                   <section className="token-section">
@@ -690,21 +818,25 @@ function App() {
                           <div className="token-input-wrap">
                             <div className="token-input-row">
                               <input
-                                type={isTokenVisible(`builtin-${provider}`) ? 'text' : 'password'}
+                                ref={(node) => {
+                                  tokenInputRefs.current[`builtin-${provider}`] = node;
+                                }}
+                                type={getTokenInputType(`builtin-${provider}`)}
                                 className="token-input"
-                                value={config.apiKeys?.[provider] || ''}
-                                onChange={(e) => updateApiKey(provider, e.target.value)}
+                                value={getTokenDisplayValue(provider, `builtin-${provider}`)}
+                                onChange={(e) => setTokenValue(provider, e.target.value)}
                                 placeholder={`输入 ${AI_PROVIDERS[provider]} Token`}
-                                onBlur={() => saveConfig({ silent: true })}
+                                readOnly={!isTokenEditable(`builtin-${provider}`)}
                               />
                               <button
                                 type="button"
                                 className="token-visibility-icon-btn"
-                                onClick={() => toggleTokenVisibility(`builtin-${provider}`)}
-                                aria-label={isTokenVisible(`builtin-${provider}`) ? '隐藏 token' : '显示 token'}
-                                title={isTokenVisible(`builtin-${provider}`) ? '隐藏 token' : '显示 token'}
+                                onClick={() => handleTokenEditAction(`builtin-${provider}`, provider)}
+                                disabled={isTokenLoading(provider)}
+                                aria-label={isTokenEditable(`builtin-${provider}`) ? '保存 token' : '编辑 token'}
+                                title={isTokenEditable(`builtin-${provider}`) ? '保存 token' : '编辑 token'}
                               >
-                                {isTokenVisible(`builtin-${provider}`) ? '🙈' : '👁'}
+                                {isTokenEditable(`builtin-${provider}`) ? '💾' : '✏️'}
                               </button>
                             </div>
                             {PROVIDER_LINKS[provider] ? (
@@ -726,10 +858,10 @@ function App() {
                   <section className="token-section">
                     <h4 className="token-section-title">自定义 Provider Token</h4>
                     <div className="tokens-list">
-                      {customTokenEntries.length === 0 ? (
+                      {customTokenProviders.length === 0 ? (
                         <div className="token-empty-tip">暂无自定义 provider，可在下方新增。</div>
                       ) : (
-                        customTokenEntries.map(([provider, token]) => (
+                        customTokenProviders.map((provider) => (
                           <div className="token-item custom" key={provider}>
                             <div className="token-meta">
                               <div className="token-name">{provider}</div>
@@ -738,21 +870,25 @@ function App() {
                             <div className="token-input-wrap">
                               <div className="token-input-row">
                                 <input
-                                  type={isTokenVisible(`custom-${provider}`) ? 'text' : 'password'}
+                                  ref={(node) => {
+                                    tokenInputRefs.current[`custom-${provider}`] = node;
+                                  }}
+                                  type={getTokenInputType(`custom-${provider}`)}
                                   className="token-input"
-                                  value={token || ''}
-                                  onChange={(e) => updateApiKey(provider, e.target.value)}
+                                  value={getTokenDisplayValue(provider, `custom-${provider}`)}
+                                  onChange={(e) => setTokenValue(provider, e.target.value)}
                                   placeholder={`输入 ${provider} Token`}
-                                  onBlur={() => saveConfig({ silent: true })}
+                                  readOnly={!isTokenEditable(`custom-${provider}`)}
                                 />
                                 <button
                                   type="button"
                                   className="token-visibility-icon-btn"
-                                  onClick={() => toggleTokenVisibility(`custom-${provider}`)}
-                                  aria-label={isTokenVisible(`custom-${provider}`) ? '隐藏 token' : '显示 token'}
-                                  title={isTokenVisible(`custom-${provider}`) ? '隐藏 token' : '显示 token'}
+                                  onClick={() => handleTokenEditAction(`custom-${provider}`, provider)}
+                                  disabled={isTokenLoading(provider)}
+                                  aria-label={isTokenEditable(`custom-${provider}`) ? '保存 token' : '编辑 token'}
+                                  title={isTokenEditable(`custom-${provider}`) ? '保存 token' : '编辑 token'}
                                 >
-                                  {isTokenVisible(`custom-${provider}`) ? '🙈' : '👁'}
+                                  {isTokenEditable(`custom-${provider}`) ? '💾' : '✏️'}
                                 </button>
                               </div>
                             </div>
@@ -777,21 +913,12 @@ function App() {
                       <div className="token-input-wrap">
                         <div className="token-input-row">
                           <input
-                            type={isTokenVisible('new-custom-token') ? 'text' : 'password'}
+                            type="password"
                             className="token-input"
                             value={newTokenValue}
                             onChange={(e) => setNewTokenValue(e.target.value)}
                             placeholder="token（可先留空，后续再填）"
                           />
-                          <button
-                            type="button"
-                            className="token-visibility-icon-btn"
-                            onClick={() => toggleTokenVisibility('new-custom-token')}
-                            aria-label={isTokenVisible('new-custom-token') ? '隐藏 token' : '显示 token'}
-                            title={isTokenVisible('new-custom-token') ? '隐藏 token' : '显示 token'}
-                          >
-                            {isTokenVisible('new-custom-token') ? '🙈' : '👁'}
-                          </button>
                         </div>
                       </div>
                       <button className="preview-btn" onClick={addCustomToken}>
@@ -869,6 +996,61 @@ function App() {
                     </>
                   )}
                 </div>
+                  )}
+                />
+                <Route
+                  path="/docs"
+                  element={(
+                    <div className="docs-panel">
+                      <div className="assistant-head">
+                        <h3>文档中心</h3>
+                        <p>浏览项目内的 Markdown 文档（README、docs 等）。</p>
+                      </div>
+                      <div className="docs-layout">
+                        <aside className="docs-sidebar">
+                          <div className="docs-sidebar-head">
+                            <span>文档列表 ({docFiles.length})</span>
+                            <button
+                              type="button"
+                              className="docs-refresh-btn"
+                              onClick={loadDocs}
+                              disabled={docLoading}
+                            >
+                              刷新
+                            </button>
+                          </div>
+                          {docFiles.length === 0 ? (
+                            <div className="empty-state">暂无可用文档</div>
+                          ) : (
+                            <div className="docs-list">
+                              {docFiles.map((doc) => (
+                                <button
+                                  key={doc.path}
+                                  type="button"
+                                  className={`docs-item ${selectedDocPath === doc.path ? 'active' : ''}`}
+                                  onClick={() => loadDocContent(doc.path)}
+                                >
+                                  <span className="docs-item-title">{doc.title}</span>
+                                  <span className="docs-item-path">{doc.path}</span>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </aside>
+                        <section className="docs-view">
+                          <div className="docs-current-path">{selectedDocPath || '请选择文档'}</div>
+                          <div className="docs-content">
+                            {docLoading ? (
+                              <div className="docs-empty-tip">文档加载中...</div>
+                            ) : docContent ? (
+                              <ReactMarkdown remarkPlugins={[remarkGfm]}>{docContent}</ReactMarkdown>
+                            ) : (
+                              <div className="docs-empty-tip">暂无文档内容</div>
+                            )}
+                          </div>
+                        </section>
+                      </div>
+                    </div>
                   )}
                 />
                 <Route
