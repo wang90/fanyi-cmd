@@ -6,41 +6,71 @@ import remarkGfm from 'remark-gfm';
 import './App.css';
 
 const API_BASE = '/api';
-const PROVIDERS = {
+const PROVIDERS: Record<string, string> = {
   libre: 'Google Translate (免费)',
   deepseek: 'DeepSeek',
   qwen: '通义千问',
   openai: 'ChatGPT',
 };
-const PROVIDER_LINKS = {
+const PROVIDER_LINKS: Record<string, string> = {
   deepseek: 'https://platform.deepseek.com/',
   qwen: 'https://bailian.console.aliyun.com/',
   openai: 'https://platform.openai.com/api-keys',
 };
 const CONFIG_PROVIDER_STORAGE_KEY = 'fanyi-config-provider';
 
+interface Config {
+  from: string;
+  to: string;
+  provider: string;
+}
+
+interface HistoryItem {
+  _id: string;
+  type?: string;
+  question?: string;
+  text?: string;
+  answer?: string;
+  result?: string;
+  provider?: string;
+  from?: string;
+  to?: string;
+  timestamp?: string;
+}
+
+interface Preset {
+  name: string;
+  config?: Config;
+}
+
+interface DocFile {
+  path: string;
+  title: string;
+  scope?: string;
+}
+
 function App() {
   const location = useLocation();
-  const [config, setConfig] = useState({
+  const [config, setConfig] = useState<Config>({
     from: 'auto',
     to: 'zh',
     provider: 'libre',
   });
-  const [tokenProviders, setTokenProviders] = useState([]);
-  const [tokenConfigured, setTokenConfigured] = useState({});
-  const [tokenValues, setTokenValues] = useState({});
-  const [tokenEditable, setTokenEditable] = useState({});
-  const [tokenEditBaseline, setTokenEditBaseline] = useState({});
-  const [history, setHistory] = useState([]);
-  const [historyFilter, setHistoryFilter] = useState('all');
+  const [tokenProviders, setTokenProviders] = useState<string[]>([]);
+  const [tokenConfigured, setTokenConfigured] = useState<Record<string, boolean>>({});
+  const [tokenValues, setTokenValues] = useState<Record<string, string>>({});
+  const [tokenEditable, setTokenEditable] = useState<Record<string, boolean>>({});
+  const [tokenEditBaseline, setTokenEditBaseline] = useState<Record<string, string>>({});
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [historyFilter, setHistoryFilter] = useState<string>('all');
   const [loading, setLoading] = useState(false);
-  const [message, setMessage] = useState({ type: '', text: '' });
-  const [presets, setPresets] = useState([]);
+  const [message, setMessage] = useState<{ type: string; text: string }>({ type: '', text: '' });
+  const [presets, setPresets] = useState<Preset[]>([]);
   const [presetName, setPresetName] = useState('');
   const [previewText, setPreviewText] = useState('hello');
   const [previewResult, setPreviewResult] = useState('');
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [askProvider, setAskProvider] = useState(() => {
+  const [askProvider, setAskProvider] = useState<string>(() => {
     if (typeof window === 'undefined') {
       return 'deepseek';
     }
@@ -51,21 +81,21 @@ function App() {
   const [askLoading, setAskLoading] = useState(false);
   const [newTokenProvider, setNewTokenProvider] = useState('');
   const [newTokenValue, setNewTokenValue] = useState('');
-  const [tokenLoading, setTokenLoading] = useState({});
-  const [docFiles, setDocFiles] = useState([]);
+  const [tokenLoading, setTokenLoading] = useState<Record<string, boolean>>({});
+  const [docFiles, setDocFiles] = useState<DocFile[]>([]);
   const [selectedDocPath, setSelectedDocPath] = useState('');
   const [docContent, setDocContent] = useState('');
   const [docLoading, setDocLoading] = useState(false);
-  const tokenInputRefs = useRef({});
+  const tokenInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const AI_PROVIDERS = Object.fromEntries(
     Object.entries(PROVIDERS).filter(([key]) => key !== 'libre')
-  );
+  ) as Record<string, string>;
   const BUILTIN_TOKEN_KEYS = Object.keys(AI_PROVIDERS);
   const customTokenProviders = tokenProviders.filter(
     (provider) => !BUILTIN_TOKEN_KEYS.includes(provider)
   );
-  const LANG_OPTIONS = [
+  const LANG_OPTIONS: [string, string][] = [
     ['auto', '自动检测'],
     ['zh', '中文'],
     ['en', '英语'],
@@ -116,7 +146,7 @@ function App() {
         setAskProvider(loaded.provider);
       }
     } catch (error) {
-      showMessage('error', '加载配置失败: ' + error.message);
+      showMessage('error', '加载配置失败: ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -125,7 +155,7 @@ function App() {
       const res = await axios.get(`${API_BASE}/history`);
       setHistory(res.data);
     } catch (error) {
-      showMessage('error', '加载历史记录失败: ' + error.message);
+      showMessage('error', '加载历史记录失败: ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -146,7 +176,7 @@ function App() {
     }
   }, [location.pathname]);
 
-  const saveConfig = async (options = {}) => {
+  const saveConfig = async (options: { silent?: boolean } = {}) => {
     const { silent = false } = options;
     setLoading(true);
     try {
@@ -155,13 +185,13 @@ function App() {
         showMessage('success', '配置已保存');
       }
     } catch (error) {
-      showMessage('error', '保存配置失败: ' + error.message);
+      showMessage('error', '保存配置失败: ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setLoading(false);
     }
   };
 
-  const deleteHistory = async (id) => {
+  const deleteHistory = async (id: string) => {
     const prevHistory = history;
     setHistory((prev) => prev.filter((item) => item._id !== id));
     try {
@@ -174,7 +204,7 @@ function App() {
       showMessage('success', '已删除');
     } catch (error) {
       setHistory(prevHistory);
-      showMessage('error', '删除失败: ' + error.message);
+      showMessage('error', '删除失败: ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
@@ -192,26 +222,27 @@ function App() {
       showMessage('success', '历史记录已清空');
     } catch (error) {
       setHistory(prevHistory);
-      showMessage('error', '清空失败: ' + error.message);
+      showMessage('error', '清空失败: ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
-  const showMessage = (type, text) => {
+  const showMessage = (type: string, text: string) => {
     setMessage({ type, text });
     setTimeout(() => setMessage({ type: '', text: '' }), 3000);
   };
 
-  const getFriendlyApiError = (error, action = '请求失败') => {
-    const status = error?.response?.status ?? error?.status;
-    const rawMsg = error?.response?.data?.error || error?.message || `${action}: 未知错误`;
+  const getFriendlyApiError = (error: unknown, action = '请求失败') => {
+    const err = error as { response?: { status?: number; data?: { error?: string } }; status?: number; message?: string };
+    const status = err?.response?.status ?? err?.status;
+    const rawMsg = err?.response?.data?.error || err?.message || `${action}: 未知错误`;
     if (status === 402 || status === 429) {
       return 'OpenAI 额度不足或已超限，请到 Billing 检查套餐与余额，或先切换 deepseek/qwen。';
     }
     return rawMsg;
   };
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
+  const formatDate = (dateString?: string) => {
+    const date = new Date(dateString || '');
     return date.toLocaleString('zh-CN');
   };
 
@@ -219,7 +250,7 @@ function App() {
     try {
       const res = await axios.get(`${API_BASE}/config-presets`);
       setPresets(Array.isArray(res.data) ? res.data : []);
-    } catch (error) {
+    } catch {
       setPresets([]);
     }
   };
@@ -236,11 +267,11 @@ function App() {
       setPresetName('');
       showMessage('success', '配置方案已保存');
     } catch (error) {
-      showMessage('error', '保存方案失败: ' + error.message);
+      showMessage('error', '保存方案失败: ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
-  const loadPreset = (preset) => {
+  const loadPreset = (preset: Preset) => {
     if (!preset?.config) return;
     setConfig(preset.config);
     if (preset.config?.provider && typeof window !== 'undefined') {
@@ -252,17 +283,17 @@ function App() {
     showMessage('success', `已加载方案：${preset.name}`);
   };
 
-  const deletePreset = async (name) => {
+  const deletePreset = async (name: string) => {
     try {
       const res = await axios.delete(`${API_BASE}/config-presets/${encodeURIComponent(name)}`);
       setPresets(Array.isArray(res.data?.presets) ? res.data.presets : []);
       showMessage('success', '方案已删除');
     } catch (error) {
-      showMessage('error', '删除方案失败: ' + error.message);
+      showMessage('error', '删除方案失败: ' + (error instanceof Error ? error.message : String(error)));
     }
   };
 
-  const loadDocContent = async (docPath) => {
+  const loadDocContent = async (docPath: string) => {
     if (!docPath) return;
     setDocLoading(true);
     try {
@@ -272,7 +303,7 @@ function App() {
       setSelectedDocPath(docPath);
       setDocContent(res.data?.doc?.content || '');
     } catch (error) {
-      showMessage('error', '加载文档内容失败: ' + error.message);
+      showMessage('error', '加载文档内容失败: ' + (error instanceof Error ? error.message : String(error)));
       setDocContent('');
     } finally {
       setDocLoading(false);
@@ -289,19 +320,19 @@ function App() {
         setDocContent('');
         return;
       }
-      const nextPath = selectedDocPath && docs.some((item) => item.path === selectedDocPath)
+      const nextPath = selectedDocPath && docs.some((item: DocFile) => item.path === selectedDocPath)
         ? selectedDocPath
-        : (docs.find((item) => item.path === 'README.md')?.path || docs[0].path);
+        : (docs.find((item: DocFile) => item.path === 'README.md')?.path || docs[0].path);
       await loadDocContent(nextPath);
     } catch (error) {
-      showMessage('error', '加载文档列表失败: ' + error.message);
+      showMessage('error', '加载文档列表失败: ' + (error instanceof Error ? error.message : String(error)));
       setDocFiles([]);
       setSelectedDocPath('');
       setDocContent('');
     }
   };
 
-  const fetchTokenByProvider = async (provider) => {
+  const fetchTokenByProvider = async (provider: string) => {
     if (!provider) return '';
     setTokenLoading((prev) => ({ ...prev, [provider]: true }));
     try {
@@ -312,14 +343,14 @@ function App() {
       setTokenProviders((prev) => (prev.includes(provider) ? prev : [...prev, provider]));
       return token;
     } catch (error) {
-      showMessage('error', '获取 token 失败: ' + error.message);
+      showMessage('error', '获取 token 失败: ' + (error instanceof Error ? error.message : String(error)));
       return '';
     } finally {
       setTokenLoading((prev) => ({ ...prev, [provider]: false }));
     }
   };
 
-  const saveTokenByProvider = async (provider) => {
+  const saveTokenByProvider = async (provider: string) => {
     if (!provider) return false;
     setTokenLoading((prev) => ({ ...prev, [provider]: true }));
     try {
@@ -333,20 +364,20 @@ function App() {
       }
       return true;
     } catch (error) {
-      showMessage('error', '保存 token 失败: ' + error.message);
+      showMessage('error', '保存 token 失败: ' + (error instanceof Error ? error.message : String(error)));
       return false;
     } finally {
       setTokenLoading((prev) => ({ ...prev, [provider]: false }));
     }
   };
 
-  const setTokenValue = (provider, value) => {
+  const setTokenValue = (provider: string, value: string) => {
     setTokenValues((prev) => ({ ...prev, [provider]: value }));
     setTokenConfigured((prev) => ({ ...prev, [provider]: Boolean((value || '').trim()) }));
     setTokenProviders((prev) => (prev.includes(provider) ? prev : [...prev, provider]));
   };
 
-  const handleTokenEditAction = async (field, provider) => {
+  const handleTokenEditAction = async (field: string, provider: string) => {
     if (!provider) return;
     const isEditing = Boolean(tokenEditable[field]);
     if (isEditing) {
@@ -380,7 +411,7 @@ function App() {
     }
   };
 
-  const removeApiKey = async (provider) => {
+  const removeApiKey = async (provider: string) => {
     setTokenValue(provider, '');
     const ok = await saveTokenByProvider(provider);
     if (!ok) return;
@@ -436,12 +467,12 @@ function App() {
       if (!response.ok) {
         let errorMsg = '';
         try {
-          const errJson = await response.json();
+          const errJson = await response.json() as { error?: string };
           errorMsg = errJson?.error || '';
         } catch {
           errorMsg = await response.text();
         }
-        const apiError = new Error(errorMsg || `问答失败: HTTP ${response.status}`);
+        const apiError = new Error(errorMsg || `问答失败: HTTP ${response.status}`) as Error & { status?: number };
         apiError.status = response.status;
         throw apiError;
       }
@@ -490,10 +521,10 @@ function App() {
     showMessage('success', `已添加 token 入口: ${provider}，请点击编辑后保存`);
   };
 
-  const isTokenEditable = (field) => Boolean(tokenEditable[field]);
-  const isTokenLoading = (provider) => Boolean(tokenLoading[provider]);
-  const getTokenInputType = (field) => (isTokenEditable(field) ? 'text' : 'password');
-  const getTokenDisplayValue = (provider, field) => {
+  const isTokenEditable = (field: string) => Boolean(tokenEditable[field]);
+  const isTokenLoading = (provider: string) => Boolean(tokenLoading[provider]);
+  const getTokenInputType = (field: string) => (isTokenEditable(field) ? 'text' : 'password');
+  const getTokenDisplayValue = (provider: string, field: string) => {
     const raw = tokenValues[provider];
     if (typeof raw === 'string' && raw.length > 0) {
       return raw;
@@ -502,14 +533,14 @@ function App() {
     return shouldMask ? '****************' : '';
   };
 
-  const handleAskProviderChange = (provider) => {
+  const handleAskProviderChange = (provider: string) => {
     setAskProvider(provider);
     if (typeof window !== 'undefined') {
       window.localStorage.setItem('ai-ask-provider', provider);
     }
   };
 
-  const handleConfigProviderChange = (provider) => {
+  const handleConfigProviderChange = (provider: string) => {
     setConfig((prev) => ({ ...prev, provider }));
     if (typeof window !== 'undefined') {
       window.localStorage.setItem(CONFIG_PROVIDER_STORAGE_KEY, provider);
@@ -634,7 +665,7 @@ function App() {
                     <button className="save-btn" onClick={runAsk} disabled={askLoading}>
                       {askLoading ? '生成中...' : '发送问题'}
                     </button>
-                    <button className="save-btn secondary" onClick={saveConfig} disabled={loading}>
+                    <button className="save-btn secondary" onClick={() => saveConfig()} disabled={loading}>
                       {loading ? '保存中...' : '保存当前配置'}
                     </button>
                   </div>
@@ -730,7 +761,7 @@ function App() {
                       </div>
                     </div>
 
-                    <button className="save-btn" onClick={saveConfig} disabled={loading}>
+                    <button className="save-btn" onClick={() => saveConfig()} disabled={loading}>
                       {loading ? '保存中...' : '💾 保存配置'}
                     </button>
 
@@ -927,7 +958,7 @@ function App() {
                     </div>
                   </div>
 
-                  <button className="save-btn token-save-btn" onClick={saveConfig} disabled={loading}>
+                  <button className="save-btn token-save-btn" onClick={() => saveConfig()} disabled={loading}>
                     {loading ? '保存中...' : '💾 保存 Token 配置'}
                   </button>
                 </div>

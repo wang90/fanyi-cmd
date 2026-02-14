@@ -6,7 +6,7 @@ import { ask, askStream } from '../src/providers.js';
 import { saveAskHistory } from '../src/db.js';
 
 const program = new Command();
-const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
+const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE || '', '.ai-config.json');
 
 const DEFAULT_CONFIG = {
   from: 'auto',
@@ -15,47 +15,47 @@ const DEFAULT_CONFIG = {
   apiKeys: {},
 };
 
-function initConfig() {
+function initConfig(): void {
   try {
     if (!fs.existsSync(configPath)) {
       fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
       return;
     }
 
-    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as typeof DEFAULT_CONFIG & { apiKeys?: Record<string, string> };
     const nextConfig = {
       ...DEFAULT_CONFIG,
       ...config,
       apiKeys: config.apiKeys || {},
     };
     fs.writeFileSync(configPath, JSON.stringify(nextConfig, null, 2));
-  } catch (err) {
+  } catch {
     // 配置文件异常时，后续会退回默认配置
   }
 }
 
-function getConfig() {
+function getConfig(): typeof DEFAULT_CONFIG & { apiKeys: Record<string, string> } {
   try {
     initConfig();
     if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as typeof DEFAULT_CONFIG & { apiKeys?: Record<string, string> };
       return {
         ...DEFAULT_CONFIG,
         ...config,
         apiKeys: config.apiKeys || {},
       };
     }
-  } catch (err) {
+  } catch {
     // 读取失败时回退默认配置
   }
   return { ...DEFAULT_CONFIG };
 }
 
-function saveConfig(config) {
+function saveConfig(config: typeof DEFAULT_CONFIG): void {
   try {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   } catch (err) {
-    console.warn('⚠️  无法保存配置文件:', err.message);
+    console.warn('⚠️  无法保存配置文件:', (err as Error).message);
   }
 }
 
@@ -77,7 +77,7 @@ program
   .command('config')
   .description('设置 AI 默认配置')
   .option('-p, --provider <provider>', '设置默认AI服务提供商 (deepseek/qwen/openai)')
-  .action((options) => {
+  .action((options: { provider?: string }) => {
     const config = getConfig();
     let changed = false;
 
@@ -102,7 +102,7 @@ program
 program
   .option('-p, --provider <provider>', '本次问答使用的AI服务提供商 (deepseek/qwen/openai)')
   .argument('[question...]', '要提问的内容')
-  .action(async (question, options) => {
+  .action(async (question: string[], options: { provider?: string }) => {
     const input = question.join(' ').trim();
     if (!input) {
       program.outputHelp();
@@ -138,7 +138,7 @@ program
           provider: config.provider || 'deepseek',
         });
       } catch (fallbackErr) {
-        console.error(`\n❌ AI 问答失败: ${fallbackErr.message}\n`);
+        console.error(`\n❌ AI 问答失败: ${(fallbackErr as Error).message}\n`);
         process.exitCode = 1;
       }
     }

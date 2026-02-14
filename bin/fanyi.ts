@@ -5,10 +5,10 @@ import fs from 'fs';
 import path from 'path';
 
 const program = new Command();
-const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
+const configPath = path.resolve(process.env.HOME || process.env.USERPROFILE || '', '.ai-config.json');
 
 // 语言代码映射
-const LANGUAGES = {
+const LANGUAGES: Record<string, string> = {
   zh: '中文',
   en: '英语',
   ja: '日语',
@@ -27,17 +27,17 @@ const DEFAULT_CONFIG = {
   from: 'auto',
   to: 'zh',
   provider: 'libre',
-  apiKeys: {}
+  apiKeys: {} as Record<string, string>,
 };
 
 // 初始化配置文件
-function initConfig() {
+function initConfig(): void {
   try {
     if (!fs.existsSync(configPath)) {
       fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2));
     } else {
       // 兼容旧配置格式
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as typeof DEFAULT_CONFIG & { token?: string; apiKeys?: Record<string, string> };
       if (config.token && !config.apiKeys) {
         config.apiKeys = {};
         delete config.token;
@@ -47,43 +47,43 @@ function initConfig() {
       }
       try {
         fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
-      } catch (err) {
+      } catch {
         // 无法写入配置文件，使用内存中的配置
       }
     }
-  } catch (err) {
+  } catch {
     // 无法创建或写入配置文件，使用默认配置
   }
 }
 
-function getConfig() {
+function getConfig(): typeof DEFAULT_CONFIG {
   try {
     initConfig();
     if (fs.existsSync(configPath)) {
-      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as typeof DEFAULT_CONFIG & { apiKeys?: Record<string, string> };
       // 确保所有必需字段存在
       return {
         ...DEFAULT_CONFIG,
         ...config,
-        apiKeys: config.apiKeys || {}
+        apiKeys: config.apiKeys || {},
       };
     }
-  } catch (err) {
+  } catch {
     // 配置文件读取失败，使用默认配置
   }
   return { ...DEFAULT_CONFIG };
 }
 
-function saveConfig(config) {
+function saveConfig(config: typeof DEFAULT_CONFIG): void {
   try {
     fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
   } catch (err) {
-    console.warn('⚠️  无法保存配置文件:', err.message);
+    console.warn('⚠️  无法保存配置文件:', (err as Error).message);
   }
 }
 
 // 显示手册
-function showManual() {
+function showManual(): void {
   console.log(`
 📖 fanyi 使用手册
 
@@ -153,7 +153,7 @@ program
   });
 
 // config命令 - 交互式配置
-const configCmd = program
+program
   .command('config')
   .description('交互式配置翻译选项')
   .option('-t, --to <lang>', '设置目标语言')
@@ -201,19 +201,19 @@ const configCmd = program
           config.to = toLang.trim();
           changed = true;
         }
-        
+
         rl.question(`当前源语言: ${config.from} (${config.from === 'auto' ? '自动检测' : LANGUAGES[config.from] || config.from})，请输入新的源语言代码 (直接回车跳过): `, (fromLang) => {
           if (fromLang.trim()) {
             config.from = fromLang.trim();
             changed = true;
           }
-          
+
           rl.question(`当前服务提供商: ${config.provider}，请输入新的服务提供商 (libre/deepseek/qwen/openai，直接回车跳过): `, (provider) => {
             if (provider.trim()) {
               config.provider = provider.trim();
               changed = true;
             }
-            
+
             if (changed) {
               saveConfig(config);
               console.log(`\n✅ 配置已更新:`);
@@ -244,7 +244,7 @@ program
   .option('-p, --provider <provider>', '设置翻译服务提供商 (libre/deepseek/qwen/openai)')
   .option('-man, --manual', '显示详细使用手册')
   .argument('[text...]', '要翻译的文字')
-  .action(async (text, options) => {
+  .action(async (text: string[], options: { to?: string; from?: string; provider?: string; manual?: boolean }) => {
     // 显示手册
     if (options.manual) {
       showManual();
@@ -258,7 +258,7 @@ program
     }
 
     const config = getConfig();
-    
+
     // 如果命令行指定了选项，优先使用命令行选项
     if (options.to) {
       config.to = options.to;
@@ -271,11 +271,11 @@ program
     }
 
     const result = await translateWord(query, config);
-    
+
     // 显示翻译结果
     const fromLang = config.from === 'auto' ? 'auto' : (LANGUAGES[config.from] || config.from);
     const toLang = LANGUAGES[config.to] || config.to;
-    const providerName = config.provider === 'libre' ? 'Google Translate' : 
+    const providerName = config.provider === 'libre' ? 'Google Translate' :
                         config.provider === 'deepseek' ? 'DeepSeek' :
                         config.provider === 'qwen' ? '通义千问' :
                         config.provider === 'openai' ? 'ChatGPT' : config.provider;

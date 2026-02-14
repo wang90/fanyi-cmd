@@ -1,7 +1,14 @@
 import axios from 'axios';
 
+export interface ProviderConfig {
+  name: string;
+  baseUrl: string;
+  apiKeyEnv: string | null;
+  defaultModel: string | null;
+}
+
 // 翻译服务提供商配置
-export const PROVIDERS = {
+export const PROVIDERS: Record<string, ProviderConfig> = {
   deepseek: {
     name: 'DeepSeek',
     baseUrl: 'https://api.deepseek.com',
@@ -29,7 +36,7 @@ export const PROVIDERS = {
 };
 
 // 语言代码映射到中文名称
-const LANGUAGE_NAMES = {
+const LANGUAGE_NAMES: Record<string, string> = {
   zh: '中文',
   en: '英语',
   ja: '日语',
@@ -45,27 +52,32 @@ const LANGUAGE_NAMES = {
 };
 
 // 获取语言的中文名称
-export function getLanguageName(code) {
+export function getLanguageName(code: string): string {
   return LANGUAGE_NAMES[code] || code;
 }
 
-function wrapProviderError(error, fallbackMessage, providerKey) {
-  if (error.response) {
-    const statusCode = error.response.status;
-    const apiMessage = error.response.data?.error?.message || JSON.stringify(error.response.data);
+interface ApiError extends Error {
+  statusCode?: number;
+}
+
+function wrapProviderError(error: unknown, fallbackMessage: string, providerKey: string): ApiError {
+  const errObj = error as { response?: { status?: number; data?: { error?: { message?: string } } }; code?: string; message?: string };
+  if (errObj.response) {
+    const statusCode = errObj.response.status ?? 500;
+    const apiMessage = errObj.response.data?.error?.message || JSON.stringify(errObj.response.data);
     const isQuotaError = providerKey === 'openai' && (statusCode === 402 || statusCode === 429);
     const quotaHint = isQuotaError
       ? '（OpenAI 账户额度不足或已超限，请检查 Billing/充值，或先切换 deepseek/qwen）'
       : '';
     const err = new Error(
       `API错误: ${statusCode} - ${apiMessage}${quotaHint}`
-    );
+    ) as ApiError;
     err.statusCode = statusCode;
     return err;
   }
 
   const networkErrorCodes = ['ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND'];
-  const isNetworkIssue = networkErrorCodes.includes(error?.code);
+  const isNetworkIssue = networkErrorCodes.includes(errObj?.code);
   const providerConfig = PROVIDERS[providerKey];
   const providerHost = providerConfig?.baseUrl
     ? (() => {
@@ -79,12 +91,12 @@ function wrapProviderError(error, fallbackMessage, providerKey) {
   const networkHint = isNetworkIssue
     ? `（当前网络无法连接 ${providerConfig?.name || providerKey} 接口 ${providerHost}，请检查网络/代理配置，或先切换其他 provider）`
     : '';
-  const err = new Error(`${fallbackMessage}: ${error.code || error.message}${networkHint}`);
+  const err = new Error(`${fallbackMessage}: ${errObj?.code || errObj?.message}${networkHint}`) as ApiError;
   err.statusCode = 502;
   return err;
 }
 
-function buildAskPayload(providerConfig, question, stream = false) {
+function buildAskPayload(providerConfig: ProviderConfig, question: string, stream = false) {
   return {
     model: providerConfig.defaultModel,
     messages: [
@@ -99,7 +111,7 @@ function buildAskPayload(providerConfig, question, stream = false) {
   };
 }
 
-function buildTranslatePayload(providerConfig, text, from, to, stream = false) {
+function buildTranslatePayload(providerConfig: ProviderConfig, text: string, from: string, to: string, stream = false) {
   const fromLang = LANGUAGE_NAMES[from] || from;
   const toLang = LANGUAGE_NAMES[to] || to;
   const systemPrompt = `You are a professional translator. Translate the user's text from ${fromLang} to ${toLang}. Only return the translated text without any explanation or additional content.`;
@@ -115,16 +127,22 @@ function buildTranslatePayload(providerConfig, text, from, to, stream = false) {
   };
 }
 
-async function readErrorBody(response) {
+async function readErrorBody(response: Response): Promise<string> {
   const contentType = response.headers.get('content-type') || '';
   if (contentType.includes('application/json')) {
-    const data = await response.json();
+    const data = await response.json() as { error?: { message?: string } };
     return data?.error?.message || JSON.stringify(data);
   }
   return await response.text();
 }
 
-async function streamChatCompletion(provider, apiKey, payload, onChunk, actionLabel) {
+async function streamChatCompletion(
+  provider: string,
+  apiKey: string,
+  payload: object,
+  onChunk: (chunk: string) => void,
+  actionLabel: string
+): Promise<string> {
   const providerConfig = PROVIDERS[provider];
   const url = `${providerConfig.baseUrl}/chat/completions`;
   const response = await fetch(url, {
@@ -146,7 +164,7 @@ async function streamChatCompletion(provider, apiKey, payload, onChunk, actionLa
   }
 
   if (!response.body) {
-    const err = new Error(`请求${providerConfig.name}${actionLabel}失败: 响应流为空`);
+    const err = new Error(`请求${providerConfig.name}${actionLabel}失败: 响应流为空`) as ApiError;
     err.statusCode = 502;
     throw err;
   }
@@ -167,10 +185,10 @@ async function streamChatCompletion(provider, apiKey, payload, onChunk, actionLa
       buffer = buffer.slice(lineBreakIndex + 1);
 
       if (line.startsWith('data:')) {
-        const payload = line.slice(5).trim();
-        if (payload && payload !== '[DONE]') {
+        const payloadStr = line.slice(5).trim();
+        if (payloadStr && payloadStr !== '[DONE]') {
           try {
-            const parsed = JSON.parse(payload);
+            const parsed = JSON.parse(payloadStr) as { choices?: Array<{ delta?: { content?: string } }> };
             const content = parsed?.choices?.[0]?.delta?.content || '';
             if (content) {
               fullText += content;
@@ -188,7 +206,7 @@ async function streamChatCompletion(provider, apiKey, payload, onChunk, actionLa
   return fullText.trim();
 }
 
-async function askWithAIStream(provider, question, apiKey, onChunk) {
+async function askWithAIStream(provider: string, question: string, apiKey: string, onChunk: (chunk: string) => void): Promise<string> {
   const providerConfig = PROVIDERS[provider];
   return await streamChatCompletion(
     provider,
@@ -200,7 +218,7 @@ async function askWithAIStream(provider, question, apiKey, onChunk) {
 }
 
 // 使用AI模型进行翻译
-async function translateWithAI(provider, text, from, to, apiKey) {
+async function translateWithAI(provider: string, text: string, from: string, to: string, apiKey: string): Promise<string> {
   const providerConfig = PROVIDERS[provider];
   return await streamChatCompletion(
     provider,
@@ -212,7 +230,7 @@ async function translateWithAI(provider, text, from, to, apiKey) {
 }
 
 // 使用AI模型进行通用问答
-async function askWithAI(provider, question, apiKey) {
+async function askWithAI(provider: string, question: string, apiKey: string): Promise<string> {
   const providerConfig = PROVIDERS[provider];
   const url = `${providerConfig.baseUrl}/chat/completions`;
   const headers = {
@@ -223,16 +241,16 @@ async function askWithAI(provider, question, apiKey) {
 
   try {
     const response = await axios.post(url, data, { headers });
-    return response.data.choices[0].message.content.trim();
+    return (response.data as { choices: Array<{ message: { content: string } }> }).choices[0].message.content.trim();
   } catch (error) {
     throw wrapProviderError(error, `请求${providerConfig.name}问答服务失败`, provider);
   }
 }
 
 // 使用 Google Translate 进行翻译（免费服务）
-async function translateWithGoogle(text, from, to) {
+async function translateWithGoogle(text: string, from: string, to: string): Promise<string> {
   try {
-    const response = await axios.get(
+    const response = await axios.get<unknown[]>(
       `${PROVIDERS.libre.baseUrl}/translate_a/single`,
       {
         params: {
@@ -248,7 +266,7 @@ async function translateWithGoogle(text, from, to) {
     );
 
     const segments = Array.isArray(response?.data?.[0]) ? response.data[0] : [];
-    const translated = segments
+    const translated = (segments as Array<unknown>)
       .map((segment) => (Array.isArray(segment) ? segment[0] : ''))
       .join('')
       .trim();
@@ -258,47 +276,58 @@ async function translateWithGoogle(text, from, to) {
     }
     return translated;
   } catch (error) {
-    if (error.response) {
-      throw wrapProviderError(error, '请求 Google Translate 翻译服务失败', 'libre');
-    }
     throw wrapProviderError(error, '请求 Google Translate 翻译服务失败', 'libre');
   }
 }
 
+export interface TranslateConfig {
+  provider?: string;
+  from?: string;
+  to?: string;
+  apiKeys?: Record<string, string>;
+  token?: string;
+}
+
 // 主翻译函数
-export async function translate(text, config) {
+export async function translate(text: string, config: TranslateConfig): Promise<string> {
   const { provider = 'libre', from = 'auto', to = 'zh', apiKeys = {}, token = '' } = config;
-  
+
   // 如果使用 Google Translate（免费服务）
   if (provider === 'libre') {
     return await translateWithGoogle(text, from, to);
   }
-  
+
   // 使用AI模型翻译
   const providerConfig = PROVIDERS[provider];
   if (!providerConfig) {
     throw new Error(`未知的翻译服务提供商: ${provider}`);
   }
-  
+
   // 获取API Key（优先使用配置中的，其次使用环境变量）
   let apiKey = apiKeys[provider];
   if (!apiKey && providerConfig.apiKeyEnv) {
-    apiKey = process.env[providerConfig.apiKeyEnv];
+    apiKey = process.env[providerConfig.apiKeyEnv] || '';
   }
   if (!apiKey && token) {
     // 兼容旧配置：仅保留 token 字段时仍可用
     apiKey = token;
   }
-  
+
   if (!apiKey) {
     throw new Error(`请配置${providerConfig.name}的API Key。可以通过Web界面配置或设置环境变量${providerConfig.apiKeyEnv}`);
   }
-  
+
   return await translateWithAI(provider, text, from, to, apiKey);
 }
 
+export interface AskConfig {
+  provider?: string;
+  apiKeys?: Record<string, string>;
+  token?: string;
+}
+
 // 主问答函数
-export async function ask(question, config) {
+export async function ask(question: string, config: AskConfig): Promise<string> {
   const { provider = 'deepseek', apiKeys = {}, token = '' } = config;
   const providerConfig = PROVIDERS[provider];
 
@@ -313,7 +342,7 @@ export async function ask(question, config) {
   // 获取API Key（优先使用配置中的，其次使用环境变量）
   let apiKey = apiKeys[provider];
   if (!apiKey && providerConfig.apiKeyEnv) {
-    apiKey = process.env[providerConfig.apiKeyEnv];
+    apiKey = process.env[providerConfig.apiKeyEnv] || '';
   }
   if (!apiKey && token) {
     apiKey = token;
@@ -326,7 +355,7 @@ export async function ask(question, config) {
   return await askWithAI(provider, question, apiKey);
 }
 
-export async function askStream(question, config, onChunk) {
+export async function askStream(question: string, config: AskConfig, onChunk?: (chunk: string) => void): Promise<string> {
   const { provider = 'deepseek', apiKeys = {}, token = '' } = config;
   const providerConfig = PROVIDERS[provider];
 
@@ -339,7 +368,7 @@ export async function askStream(question, config, onChunk) {
 
   let apiKey = apiKeys[provider];
   if (!apiKey && providerConfig.apiKeyEnv) {
-    apiKey = process.env[providerConfig.apiKeyEnv];
+    apiKey = process.env[providerConfig.apiKeyEnv] || '';
   }
   if (!apiKey && token) {
     apiKey = token;

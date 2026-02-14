@@ -1,11 +1,11 @@
 import express from 'express';
 import cors from 'cors';
-import { MongoClient } from 'mongodb';
+import { MongoClient, ObjectId } from 'mongodb';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { translate as previewTranslate, askStream as askAIStream } from '../src/providers.js';
-import { saveAskHistory } from '../src/db.js';
+import { saveAskHistory, saveHistory } from '../src/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -14,26 +14,32 @@ const app = express();
 const PORT = 3000;
 
 // MongoDB连接
-let db = null;
-let client = null;
+let db: import('mongodb').Db | null = null;
+let client: import('mongodb').MongoClient | null = null;
 const DB_NAME = 'ai-cmd';
 const COLLECTION_NAME = 'history';
 const CONFIG_COLLECTION_NAME = 'config';
 const CONFIG_DOC_ID = 'default';
 const PROJECT_ROOT = path.resolve(__dirname, '..');
 
-function getDocTitle(relativePath) {
+function getDocTitle(relativePath: string): string {
   const filename = path.basename(relativePath, '.md');
   return filename.replace(/[-_]/g, ' ');
 }
 
-function collectMarkdownDocs() {
+interface DocEntry {
+  path: string;
+  title: string;
+  scope: string;
+}
+
+function collectMarkdownDocs(): DocEntry[] {
   const roots = [
     { absDir: PROJECT_ROOT, scope: 'root' },
     { absDir: path.join(PROJECT_ROOT, 'docs'), scope: 'docs' },
   ];
-  const docs = [];
-  const seen = new Set();
+  const docs: DocEntry[] = [];
+  const seen = new Set<string>();
 
   for (const root of roots) {
     if (!fs.existsSync(root.absDir)) continue;
@@ -60,11 +66,19 @@ function collectMarkdownDocs() {
   return docs;
 }
 
-function getConfigPath() {
-  return path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-config.json');
+function getConfigPath(): string {
+  return path.resolve(process.env.HOME || process.env.USERPROFILE || '', '.ai-config.json');
 }
 
-function normalizeConfig(config = {}) {
+interface AppConfig {
+  from?: string;
+  to?: string;
+  provider?: string;
+  apiKeys?: Record<string, string>;
+  token?: string;
+}
+
+function normalizeConfig(config: AppConfig = {}): Required<Omit<AppConfig, 'token'>> & { apiKeys: Record<string, string> } {
   const normalized = { ...config };
   if (normalized.token && !normalized.apiKeys) {
     normalized.apiKeys = {};
@@ -81,10 +95,16 @@ function normalizeConfig(config = {}) {
   if (!normalized.apiKeys || typeof normalized.apiKeys !== 'object') {
     normalized.apiKeys = {};
   }
-  return normalized;
+  return normalized as Required<Omit<AppConfig, 'token'>> & { apiKeys: Record<string, string> };
 }
 
-function sanitizeConfigForClient(config = {}) {
+function sanitizeConfigForClient(config: AppConfig = {}): {
+  from: string;
+  to: string;
+  provider: string;
+  tokenProviders: string[];
+  tokenConfigured: Record<string, boolean>;
+} {
   const normalized = normalizeConfig(config);
   const tokenEntries = Object.entries(normalized.apiKeys || {});
   const tokenProviders = tokenEntries.map(([provider]) => provider);
@@ -101,30 +121,30 @@ function sanitizeConfigForClient(config = {}) {
   };
 }
 
-function readConfigFromFile() {
+function readConfigFromFile(): ReturnType<typeof normalizeConfig> | null {
   const configPath = getConfigPath();
   if (!fs.existsSync(configPath)) {
     return null;
   }
-  const fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+  const fileConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8')) as AppConfig;
   return normalizeConfig(fileConfig);
 }
 
-function writeConfigToFile(config) {
+function writeConfigToFile(config: AppConfig): void {
   const configPath = getConfigPath();
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
 }
 
-async function loadPersistedConfig() {
+async function loadPersistedConfig(): Promise<ReturnType<typeof normalizeConfig>> {
   if (db) {
     try {
-      const configCollection = db.collection(CONFIG_COLLECTION_NAME);
+      const configCollection = db.collection<any>(CONFIG_COLLECTION_NAME);
       const saved = await configCollection.findOne({ _id: CONFIG_DOC_ID });
       if (saved) {
         const { _id, ...configData } = saved;
-        return normalizeConfig(configData);
+        return normalizeConfig(configData as AppConfig);
       }
-    } catch (error) {
+    } catch {
       // MongoDB配置读取失败时回退到文件配置
     }
   }
@@ -142,9 +162,9 @@ async function loadPersistedConfig() {
   });
 }
 
-async function persistConfig(config) {
+async function persistConfig(config: AppConfig): Promise<void> {
   if (db) {
-    const configCollection = db.collection(CONFIG_COLLECTION_NAME);
+    const configCollection = db.collection<any>(CONFIG_COLLECTION_NAME);
     await configCollection.updateOne(
       { _id: CONFIG_DOC_ID },
       {
@@ -164,7 +184,7 @@ async function persistConfig(config) {
   writeConfigToFile(config);
 }
 
-async function connectDB() {
+async function connectDB(): Promise<void> {
   if (db) {
     return; // 已经连接
   }
@@ -174,7 +194,7 @@ async function connectDB() {
     db = client.db(DB_NAME);
     console.log('✅ MongoDB连接成功');
   } catch (error) {
-    console.error('❌ MongoDB连接失败:', error.message);
+    console.error('❌ MongoDB连接失败:', (error as Error).message);
     console.log('提示: 请确保MongoDB服务已启动 (mongod)');
     db = null;
     client = null;
@@ -193,7 +213,7 @@ app.get('/api/config', async (req, res) => {
     const config = await loadPersistedConfig();
     res.json(sanitizeConfigForClient(config));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: (error as Error).message });
   }
 });
 
@@ -201,7 +221,7 @@ app.get('/api/config', async (req, res) => {
 app.post('/api/config', async (req, res) => {
   try {
     const persistedConfig = await loadPersistedConfig();
-    const body = req.body || {};
+    const body = (req.body || {}) as AppConfig;
     const nextConfig = normalizeConfig({
       ...persistedConfig,
       ...body,
@@ -211,7 +231,7 @@ app.post('/api/config', async (req, res) => {
     await persistConfig(nextConfig);
     res.json({ success: true, message: '配置已保存' });
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    res.status(500).json({ error: (error as Error).message });
   }
 });
 
@@ -232,7 +252,7 @@ app.get('/api/token/:provider', async (req, res) => {
       configured: Boolean(token.trim()),
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -262,7 +282,7 @@ app.post('/api/token/:provider', async (req, res) => {
       configured: Boolean(token.trim()),
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -272,7 +292,7 @@ app.get('/api/docs', (req, res) => {
     const docs = collectMarkdownDocs();
     res.json({ success: true, docs });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -301,7 +321,7 @@ app.get('/api/docs/content', (req, res) => {
       },
     });
   } catch (error) {
-    res.status(500).json({ success: false, error: error.message });
+    res.status(500).json({ success: false, error: (error as Error).message });
   }
 });
 
@@ -309,7 +329,7 @@ app.get('/api/docs/content', (req, res) => {
 app.post('/api/preview', async (req, res) => {
   try {
     const text = (req.body?.text || 'hello').toString();
-    const cfg = req.body || {};
+    const cfg = (req.body || {}) as { provider?: string; from?: string; to?: string };
     const persistedConfig = await loadPersistedConfig();
     const previewConfig = {
       provider: cfg.provider || persistedConfig.provider || 'libre',
@@ -321,8 +341,9 @@ app.post('/api/preview', async (req, res) => {
     const result = await previewTranslate(text, previewConfig);
     res.json({ success: true, text, result });
   } catch (error) {
-    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
-    res.status(statusCode).json({ success: false, error: error.message });
+    const err = error as { statusCode?: number; message?: string };
+    const statusCode = Number.isInteger(err?.statusCode) ? err.statusCode : 500;
+    res.status(statusCode).json({ success: false, error: err.message || String(error) });
   }
 });
 
@@ -334,7 +355,7 @@ app.post('/api/ask', async (req, res) => {
       return res.status(400).json({ success: false, error: '问题不能为空' });
     }
 
-    const cfg = req.body || {};
+    const cfg = (req.body || {}) as { provider?: string };
     const persistedConfig = await loadPersistedConfig();
     const askConfig = {
       provider: cfg.provider || persistedConfig.provider || 'deepseek',
@@ -360,32 +381,33 @@ app.post('/api/ask', async (req, res) => {
       await saveAskHistory(question, answer || '', {
         provider: askConfig.provider || 'deepseek',
       });
-    } catch (historyErr) {
+    } catch {
       // 问答结果优先，历史写入失败不影响主流程
     }
     res.end();
   } catch (error) {
-    const statusCode = Number.isInteger(error?.statusCode) ? error.statusCode : 500;
+    const err = error as { statusCode?: number; message?: string };
+    const statusCode = Number.isInteger(err?.statusCode) ? err.statusCode : 500;
     console.error(
       '[API /api/ask] 请求失败:',
       JSON.stringify({
         statusCode,
-        provider: req.body?.config?.provider || 'deepseek',
-        questionLength: ((req.body?.question || '').toString().trim()).length,
-        error: error?.message || String(error),
+        provider: (req.body as { config?: { provider?: string } })?.config?.provider || 'deepseek',
+        questionLength: ((req.body as { question?: string })?.question || '').toString().trim().length,
+        error: err?.message || String(error),
       })
     );
     if (res.headersSent) {
       res.end();
       return;
     }
-    res.status(statusCode).json({ success: false, error: error.message });
+    res.status(statusCode).json({ success: false, error: err.message || String(error) });
   }
 });
 
 // 获取配置方案列表
 app.get('/api/config-presets', (req, res) => {
-  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-presets.json');
+  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE || '', '.ai-presets.json');
   try {
     if (fs.existsSync(presetsPath)) {
       const presets = JSON.parse(fs.readFileSync(presetsPath, 'utf-8'));
@@ -395,30 +417,30 @@ app.get('/api/config-presets', (req, res) => {
       res.json([]);
     }
   } catch (error) {
-    console.error('读取配置方案失败:', error.message);
+    console.error('读取配置方案失败:', (error as Error).message);
     res.json([]);
   }
 });
 
 // 保存配置方案
 app.post('/api/config-presets', (req, res) => {
-  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-presets.json');
+  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE || '', '.ai-presets.json');
   try {
-    let presets = [];
+    let presets: Array<{ name: string; config: unknown; createdAt?: string; updatedAt?: string }> = [];
     if (fs.existsSync(presetsPath)) {
       const data = JSON.parse(fs.readFileSync(presetsPath, 'utf-8'));
       // 确保 presets 是数组
       presets = Array.isArray(data) ? data : [];
     }
-    
-    const { name, config: presetConfig } = req.body;
-    
+
+    const { name, config: presetConfig } = req.body as { name?: string; config?: unknown };
+
     if (!name || !presetConfig) {
       return res.status(400).json({ error: '缺少必要参数' });
     }
-    
+
     // 检查是否已存在同名方案
-    const existingIndex = presets.findIndex(p => p.name === name);
+    const existingIndex = presets.findIndex((p) => p.name === name);
     if (existingIndex >= 0) {
       // 更新现有方案
       presets[existingIndex] = { name, config: presetConfig, updatedAt: new Date().toISOString() };
@@ -430,32 +452,32 @@ app.post('/api/config-presets', (req, res) => {
       }
       presets.push({ name, config: presetConfig, createdAt: new Date().toISOString() });
     }
-    
+
     fs.writeFileSync(presetsPath, JSON.stringify(presets, null, 2));
     res.json({ success: true, presets: Array.isArray(presets) ? presets : [] });
   } catch (error) {
-    console.error('保存配置方案失败:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('保存配置方案失败:', (error as Error).message);
+    res.status(500).json({ error: (error as Error).message });
   }
 });
 
 // 删除配置方案
 app.delete('/api/config-presets/:name', (req, res) => {
-  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE, '.ai-presets.json');
+  const presetsPath = path.resolve(process.env.HOME || process.env.USERPROFILE || '', '.ai-presets.json');
   try {
     if (!fs.existsSync(presetsPath)) {
       return res.json({ success: true, presets: [] });
     }
-    
+
     const data = JSON.parse(fs.readFileSync(presetsPath, 'utf-8'));
     const presets = Array.isArray(data) ? data : [];
-    const filtered = presets.filter(p => p.name !== decodeURIComponent(req.params.name));
-    
+    const filtered = presets.filter((p: { name: string }) => p.name !== decodeURIComponent(req.params.name));
+
     fs.writeFileSync(presetsPath, JSON.stringify(filtered, null, 2));
     res.json({ success: true, presets: Array.isArray(filtered) ? filtered : [] });
   } catch (error) {
-    console.error('删除配置方案失败:', error.message);
-    res.status(500).json({ error: error.message });
+    console.error('删除配置方案失败:', (error as Error).message);
+    res.status(500).json({ error: (error as Error).message });
   }
 });
 
@@ -466,7 +488,7 @@ app.get('/api/history', async (req, res) => {
       // 数据库未连接时返回空数组，而不是503错误
       return res.json([]);
     }
-    const collection = db.collection(COLLECTION_NAME);
+    const collection = db.collection<any>(COLLECTION_NAME);
     const type = (req.query?.type || 'all').toString();
     const filter = type === 'qa' || type === 'translation' ? { type } : {};
     const history = await collection
@@ -477,7 +499,7 @@ app.get('/api/history', async (req, res) => {
     res.json(history);
   } catch (error) {
     // 出错时也返回空数组，避免前端报错
-    console.error('获取历史记录失败:', error.message);
+    console.error('获取历史记录失败:', (error as Error).message);
     res.json([]);
   }
 });
@@ -488,12 +510,18 @@ app.delete('/api/history/:id', async (req, res) => {
     if (!db) {
       return res.json({ success: false, message: '数据库未连接' });
     }
-    const collection = db.collection(COLLECTION_NAME);
-    const result = await collection.deleteOne({ _id: req.params.id });
+    const collection = db.collection<any>(COLLECTION_NAME);
+    const id = req.params.id;
+    let result: { deletedCount: number };
+    try {
+      result = await collection.deleteOne({ _id: new ObjectId(id) });
+    } catch {
+      result = await collection.deleteOne({ _id: id });
+    }
     res.json({ success: true, deletedCount: result.deletedCount });
   } catch (error) {
-    console.error('删除历史记录失败:', error.message);
-    res.json({ success: false, message: error.message });
+    console.error('删除历史记录失败:', (error as Error).message);
+    res.json({ success: false, message: (error as Error).message });
   }
 });
 
@@ -503,18 +531,18 @@ app.delete('/api/history', async (req, res) => {
     if (!db) {
       return res.json({ success: false, message: '数据库未连接' });
     }
-    const collection = db.collection(COLLECTION_NAME);
+    const collection = db.collection<any>(COLLECTION_NAME);
     await collection.deleteMany({});
     res.json({ success: true });
   } catch (error) {
-    console.error('清空历史记录失败:', error.message);
-    res.json({ success: false, message: error.message });
+    console.error('清空历史记录失败:', (error as Error).message);
+    res.json({ success: false, message: (error as Error).message });
   }
 });
 
-// 保存翻译历史（供CLI调用）- 已移至 src/db.js
+// 保存翻译历史（供CLI调用）- 已移至 src/db.ts
 // 保留此导出以保持向后兼容
-export { saveHistory } from '../src/db.js';
+export { saveHistory };
 
 // 处理未匹配的API路由
 app.use('/api/*', (req, res) => {
@@ -539,7 +567,7 @@ app.get('*', (req, res) => {
 });
 
 // 启动服务器
-export async function startServer() {
+export async function startServer(): Promise<void> {
   await connectDB();
   app.listen(PORT, () => {
     console.log(`🚀 Web服务器已启动: http://localhost:${PORT}`);

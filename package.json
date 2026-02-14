@@ -3,29 +3,36 @@
   "version": "1.0.0",
   "description": "AI command line assistant with translation support",
   "bin": {
-    "ai": "./bin/ai.js",
-    "fanyi": "./bin/fanyi.js"
+    "ai": "./bin/ai.ts",
+    "fanyi": "./bin/fanyi.ts"
   },
   "type": "module",
   "scripts": {
-    "dev": "node --watch server/index.js",
-    "web": "node server/index.js",
-    "start": "node server/index.js",
-    "start:web": "node server/index.js",
-    "config": "node bin/ai.js config",
+    "dev": "tsx watch server/index.ts",
+    "web": "tsx server/index.ts",
+    "start": "tsx server/index.ts",
+    "start:web": "tsx server/index.ts",
+    "config": "tsx bin/ai.ts config",
     "build": "cd web && npm run build",
     "build:web": "cd web && npm run build",
     "dev:web": "cd web && npm run dev",
     "preview:web": "cd web && npm run preview",
-    "fanyi": "node bin/fanyi.js",
-    "ai": "node bin/ai.js"
+    "fanyi": "tsx bin/fanyi.ts",
+    "ai": "tsx bin/ai.ts"
   },
   "dependencies": {
     "axios": "^1.7.0",
     "commander": "^12.0.0",
-    "pake-cli": "^3.6.3",
-    "express": "^4.18.2",
     "cors": "^2.8.5",
-    "mongodb": "^6.3.0"
+    "express": "^4.18.2",
+    "mongodb": "^6.3.0",
+    "pake-cli": "^3.6.3",
+    "tsx": "^4.21.0"
+  },
+  "devDependencies": {
+    "@types/cors": "^2.8.19",
+    "@types/express": "^5.0.6",
+    "@types/node": "^25.2.3",
+    "typescript": "^5.9.3"
   }
 }
