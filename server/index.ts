@@ -3,6 +3,7 @@ import cors from 'cors';
 import { MongoClient, ObjectId } from 'mongodb';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { createRequire } from 'module';
 import fs from 'fs';
 import { spawn } from 'child_process';
 import { translate as previewTranslate, askStream as askAIStream } from '../src/providers.js';
@@ -10,6 +11,8 @@ import { saveAskHistory, saveHistory } from '../src/db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+const require = createRequire(import.meta.url);
+const ISO6391 = require('iso-639-1') as { getName: (code: string) => string };
 
 const app = express();
 const PORT = 3000;
@@ -20,8 +23,24 @@ let client: import('mongodb').MongoClient | null = null;
 const DB_NAME = 'ai-cmd';
 const COLLECTION_NAME = 'history';
 const CONFIG_COLLECTION_NAME = 'config';
+const LANGUAGE_COLLECTION_NAME = 'languages';
 const CONFIG_DOC_ID = 'default';
 const PROJECT_ROOT = path.resolve(__dirname, '..');
+const DEFAULT_LANGUAGES: Array<{ code: string; name: string; isSourceOnly?: boolean }> = [
+  { code: 'auto', name: '自动检测', isSourceOnly: true },
+  { code: 'zh', name: '中文' },
+  { code: 'en', name: '英语' },
+  { code: 'ja', name: '日语' },
+  { code: 'ko', name: '韩语' },
+  { code: 'fr', name: '法语' },
+  { code: 'de', name: '德语' },
+  { code: 'es', name: '西班牙语' },
+  { code: 'ru', name: '俄语' },
+  { code: 'pt', name: '葡萄牙语' },
+  { code: 'it', name: '意大利语' },
+  { code: 'ar', name: '阿拉伯语' },
+  { code: 'vi', name: '越南语' },
+];
 
 function getDocTitle(relativePath: string): string {
   const filename = path.basename(relativePath, '.md');
@@ -77,6 +96,43 @@ interface AppConfig {
   provider?: string;
   apiKeys?: Record<string, string>;
   token?: string;
+}
+
+interface LanguageEntry {
+  code: string;
+  name: string;
+  isSourceOnly?: boolean;
+}
+
+function normalizeLanguageCode(code: string): string {
+  return (code || '').toString().trim().toLowerCase();
+}
+
+function isValidLanguageCode(code: string): boolean {
+  if (code === 'auto') return true;
+  // 支持 BCP47 的简化形态：<language> 或 <language>-<region>
+  const match = /^([a-z]{2})(?:-([a-z]{2}))?$/.exec(code);
+  if (!match) return false;
+  const language = match[1];
+  return Boolean(ISO6391.getName(language));
+}
+
+async function ensureDefaultLanguages(): Promise<void> {
+  if (!db) return;
+  const collection = db.collection<any>(LANGUAGE_COLLECTION_NAME);
+  const count = await collection.countDocuments();
+  if (count > 0) return;
+  const now = new Date().toISOString();
+  await collection.insertMany(
+    DEFAULT_LANGUAGES.map((item, index) => ({
+      code: item.code,
+      name: item.name,
+      isSourceOnly: Boolean(item.isSourceOnly),
+      sort: index,
+      createdAt: now,
+      updatedAt: now,
+    }))
+  );
 }
 
 function normalizeConfig(config: AppConfig = {}): Required<Omit<AppConfig, 'token'>> & { apiKeys: Record<string, string> } {
@@ -193,6 +249,7 @@ async function connectDB(): Promise<void> {
     client = new MongoClient('mongodb://localhost:27017');
     await client.connect();
     db = client.db(DB_NAME);
+    await ensureDefaultLanguages();
     console.log('✅ MongoDB连接成功');
   } catch (error) {
     console.error('❌ MongoDB连接失败:', (error as Error).message);
@@ -282,6 +339,141 @@ app.post('/api/token/:provider', async (req, res) => {
       provider,
       configured: Boolean(token.trim()),
     });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 语言列表（数据库）
+app.get('/api/languages', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({ success: false, error: '数据库未连接，无法加载语言列表' });
+    }
+    await ensureDefaultLanguages();
+    const collection = db.collection<any>(LANGUAGE_COLLECTION_NAME);
+    const languages = await collection
+      .find({})
+      .project({ _id: 0, code: 1, name: 1, isSourceOnly: 1, sort: 1 })
+      .sort({ sort: 1, code: 1 })
+      .toArray();
+    res.json({ success: true, languages });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 新增语言
+app.post('/api/languages', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({ success: false, error: '数据库未连接，无法新增语言' });
+    }
+    const code = normalizeLanguageCode((req.body?.code || '').toString());
+    const name = (req.body?.name || '').toString().trim();
+    const isSourceOnly = Boolean(req.body?.isSourceOnly);
+    if (!code || !name) {
+      return res.status(400).json({ success: false, error: 'code 和 name 不能为空' });
+    }
+    if (!isValidLanguageCode(code)) {
+      return res.status(400).json({
+        success: false,
+        error: 'code 不合法，请使用标准语言代码（ISO 639-1，如 en / vi / ar 或 zh-cn）',
+        reference: 'https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry',
+      });
+    }
+
+    const collection = db.collection<any>(LANGUAGE_COLLECTION_NAME);
+    await ensureDefaultLanguages();
+    const exists = await collection.findOne({ code });
+    if (exists) {
+      return res.status(409).json({ success: false, error: `语言 ${code} 已存在` });
+    }
+    const now = new Date().toISOString();
+    const maxSortDoc = await collection.find({}).sort({ sort: -1 }).limit(1).next();
+    const sort = Number.isFinite(Number(maxSortDoc?.sort)) ? Number(maxSortDoc?.sort) + 1 : 0;
+    await collection.insertOne({
+      code,
+      name,
+      isSourceOnly,
+      sort,
+      createdAt: now,
+      updatedAt: now,
+    });
+    res.json({ success: true, language: { code, name, isSourceOnly, sort } });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 更新语言
+app.put('/api/languages/:code', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({ success: false, error: '数据库未连接，无法更新语言' });
+    }
+    const code = normalizeLanguageCode(decodeURIComponent((req.params?.code || '').toString()));
+    if (!code) {
+      return res.status(400).json({ success: false, error: 'code 不能为空' });
+    }
+    const updates: Partial<LanguageEntry> = {};
+    if (typeof req.body?.name === 'string') {
+      const name = req.body.name.trim();
+      if (!name) {
+        return res.status(400).json({ success: false, error: 'name 不能为空' });
+      }
+      updates.name = name;
+    }
+    if (typeof req.body?.isSourceOnly === 'boolean') {
+      updates.isSourceOnly = req.body.isSourceOnly;
+    }
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({ success: false, error: '没有可更新字段' });
+    }
+    if (code === 'auto') {
+      updates.isSourceOnly = true;
+    }
+
+    const collection = db.collection<any>(LANGUAGE_COLLECTION_NAME);
+    await ensureDefaultLanguages();
+    const result = await collection.updateOne(
+      { code },
+      {
+        $set: {
+          ...updates,
+          updatedAt: new Date().toISOString(),
+        },
+      }
+    );
+    if (!result.matchedCount) {
+      return res.status(404).json({ success: false, error: '语言不存在' });
+    }
+    res.json({ success: true });
+  } catch (error) {
+    res.status(500).json({ success: false, error: (error as Error).message });
+  }
+});
+
+// 删除语言
+app.delete('/api/languages/:code', async (req, res) => {
+  try {
+    if (!db) {
+      return res.status(503).json({ success: false, error: '数据库未连接，无法删除语言' });
+    }
+    const code = normalizeLanguageCode(decodeURIComponent((req.params?.code || '').toString()));
+    if (!code) {
+      return res.status(400).json({ success: false, error: 'code 不能为空' });
+    }
+    if (code === 'auto') {
+      return res.status(400).json({ success: false, error: 'auto 为系统内置项，不允许删除' });
+    }
+    const collection = db.collection<any>(LANGUAGE_COLLECTION_NAME);
+    await ensureDefaultLanguages();
+    const result = await collection.deleteOne({ code });
+    if (!result.deletedCount) {
+      return res.status(404).json({ success: false, error: '语言不存在' });
+    }
+    res.json({ success: true });
   } catch (error) {
     res.status(500).json({ success: false, error: (error as Error).message });
   }

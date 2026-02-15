@@ -49,6 +49,28 @@ interface DocFile {
   scope?: string;
 }
 
+interface LanguageItem {
+  code: string;
+  name: string;
+  isSourceOnly?: boolean;
+}
+
+const DEFAULT_LANGUAGE_OPTIONS: LanguageItem[] = [
+  { code: 'auto', name: '自动检测', isSourceOnly: true },
+  { code: 'zh', name: '中文' },
+  { code: 'en', name: '英语' },
+  { code: 'ja', name: '日语' },
+  { code: 'ko', name: '韩语' },
+  { code: 'fr', name: '法语' },
+  { code: 'de', name: '德语' },
+  { code: 'es', name: '西班牙语' },
+  { code: 'ru', name: '俄语' },
+  { code: 'pt', name: '葡萄牙语' },
+  { code: 'it', name: '意大利语' },
+  { code: 'ar', name: '阿拉伯语' },
+  { code: 'vi', name: '越南语' },
+];
+
 function App() {
   const location = useLocation();
   const [config, setConfig] = useState<Config>({
@@ -86,6 +108,12 @@ function App() {
   const [selectedDocPath, setSelectedDocPath] = useState('');
   const [docContent, setDocContent] = useState('');
   const [docLoading, setDocLoading] = useState(false);
+  const [languageOptions, setLanguageOptions] = useState<LanguageItem[]>(DEFAULT_LANGUAGE_OPTIONS);
+  const [languageDraftNames, setLanguageDraftNames] = useState<Record<string, string>>({});
+  const [languageLoading, setLanguageLoading] = useState(false);
+  const [newLangCode, setNewLangCode] = useState('');
+  const [newLangName, setNewLangName] = useState('');
+  const [newLangSourceOnly, setNewLangSourceOnly] = useState(false);
   const tokenInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   const AI_PROVIDERS = Object.fromEntries(
@@ -95,27 +123,19 @@ function App() {
   const customTokenProviders = tokenProviders.filter(
     (provider) => !BUILTIN_TOKEN_KEYS.includes(provider)
   );
-  const LANG_OPTIONS: [string, string][] = [
-    ['auto', '自动检测'],
-    ['zh', '中文'],
-    ['en', '英语'],
-    ['ja', '日语'],
-    ['ko', '韩语'],
-    ['fr', '法语'],
-    ['de', '德语'],
-    ['es', '西班牙语'],
-    ['ru', '俄语'],
-  ];
   const HISTORY_FILTERS = [
     { key: 'all', label: '全部' },
     { key: 'qa', label: '问题类' },
     { key: 'translation', label: '翻译类' },
   ];
+  const sourceLanguages = languageOptions;
+  const targetLanguages = languageOptions.filter((item) => item.code !== 'auto' && !item.isSourceOnly);
 
   useEffect(() => {
     loadConfig();
     loadHistory();
     loadPresets();
+    loadLanguages({ silent: true });
   }, []);
 
   const loadConfig = async () => {
@@ -173,6 +193,9 @@ function App() {
     }
     if (location.pathname === '/docs') {
       loadDocs();
+    }
+    if (location.pathname === '/languages') {
+      loadLanguages({ silent: true });
     }
   }, [location.pathname]);
 
@@ -252,6 +275,100 @@ function App() {
       setPresets(Array.isArray(res.data) ? res.data : []);
     } catch {
       setPresets([]);
+    }
+  };
+
+  const loadLanguages = async (options: { silent?: boolean } = {}) => {
+    const { silent = false } = options;
+    setLanguageLoading(true);
+    try {
+      const res = await axios.get(`${API_BASE}/languages`);
+      const languagesRaw = Array.isArray(res.data?.languages) ? res.data.languages : [];
+      const languages = languagesRaw.map((item: LanguageItem) => ({
+        code: (item.code || '').toString(),
+        name: (item.name || '').toString(),
+        isSourceOnly: Boolean(item.isSourceOnly),
+      }));
+      const nextLanguages = languages.length > 0 ? languages : DEFAULT_LANGUAGE_OPTIONS;
+      setLanguageOptions(nextLanguages);
+      setLanguageDraftNames(
+        Object.fromEntries(
+          nextLanguages.map((item) => [item.code, item.name])
+        )
+      );
+    } catch (error) {
+      setLanguageOptions(DEFAULT_LANGUAGE_OPTIONS);
+      setLanguageDraftNames(
+        Object.fromEntries(
+          DEFAULT_LANGUAGE_OPTIONS.map((item) => [item.code, item.name])
+        )
+      );
+      if (!silent) {
+        showMessage('error', '加载语言列表失败: ' + (error instanceof Error ? error.message : String(error)));
+      }
+    } finally {
+      setLanguageLoading(false);
+    }
+  };
+
+  const addLanguage = async () => {
+    const code = newLangCode.trim().toLowerCase();
+    const name = newLangName.trim();
+    if (!code || !name) {
+      showMessage('error', '请填写语言代码和语言名称');
+      return;
+    }
+    if (!/^[a-z][a-z0-9-]{0,14}$/.test(code)) {
+      showMessage('error', '语言代码格式不合法，例如 zh / en / zh-cn');
+      return;
+    }
+    try {
+      await axios.post(`${API_BASE}/languages`, {
+        code,
+        name,
+        isSourceOnly: newLangSourceOnly,
+      });
+      setNewLangCode('');
+      setNewLangName('');
+      setNewLangSourceOnly(false);
+      await loadLanguages({ silent: true });
+      showMessage('success', `语言 ${code} 已添加`);
+    } catch (error) {
+      const err = error as { response?: { data?: { error?: string } }; message?: string };
+      showMessage('error', err?.response?.data?.error || err?.message || '新增语言失败');
+    }
+  };
+
+  const updateLanguage = async (code: string) => {
+    const nextName = (languageDraftNames[code] || '').trim();
+    const sourceOnly = code === 'auto' ? true : Boolean(languageOptions.find((item) => item.code === code)?.isSourceOnly);
+    if (!nextName) {
+      showMessage('error', '语言名称不能为空');
+      return;
+    }
+    try {
+      await axios.put(`${API_BASE}/languages/${encodeURIComponent(code)}`, {
+        name: nextName,
+        isSourceOnly: sourceOnly,
+      });
+      await loadLanguages({ silent: true });
+      showMessage('success', `语言 ${code} 已更新`);
+    } catch (error) {
+      const err = error as { response?: { data?: { error?: string } }; message?: string };
+      showMessage('error', err?.response?.data?.error || err?.message || '更新语言失败');
+    }
+  };
+
+  const removeLanguage = async (code: string) => {
+    if (!code) return;
+    if (!window.confirm(`确认删除语言 ${code} 吗？`)) return;
+    try {
+      await axios.delete(`${API_BASE}/languages/${encodeURIComponent(code)}`);
+      await loadLanguages({ silent: true });
+      showMessage('success', `语言 ${code} 已删除`);
+    } catch (error) {
+      const err = error as { response?: { data?: { error?: string } }; message?: string };
+      showMessage('error', err?.response?.data?.error || err?.message || '删除语言失败');
     }
   };
 
@@ -578,6 +695,12 @@ function App() {
                   🔑 Token 管理
                 </NavLink>
                 <NavLink
+                  to="/languages"
+                  className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}
+                >
+                  🌍 语言管理
+                </NavLink>
+                <NavLink
                   to="/history"
                   className={({ isActive }) => `tab ${isActive ? 'active' : ''}`}
                 >
@@ -738,9 +861,9 @@ function App() {
                           value={config.from || 'auto'}
                           onChange={(e) => setConfig({ ...config, from: e.target.value })}
                         >
-                          {LANG_OPTIONS.map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
+                          {sourceLanguages.map((item) => (
+                            <option key={item.code} value={item.code}>
+                              {item.name}
                             </option>
                           ))}
                         </select>
@@ -752,9 +875,9 @@ function App() {
                           value={config.to || 'zh'}
                           onChange={(e) => setConfig({ ...config, to: e.target.value })}
                         >
-                          {LANG_OPTIONS.filter(([value]) => value !== 'auto').map(([value, label]) => (
-                            <option key={value} value={value}>
-                              {label}
+                          {targetLanguages.map((item) => (
+                            <option key={item.code} value={item.code}>
+                              {item.name}
                             </option>
                           ))}
                         </select>
@@ -962,6 +1085,123 @@ function App() {
                     {loading ? '保存中...' : '💾 保存 Token 配置'}
                   </button>
                 </div>
+                  )}
+                />
+
+                <Route
+                  path="/languages"
+                  element={(
+                    <div className="tokens-panel">
+                      <div className="assistant-head">
+                        <h3>语言管理</h3>
+                        <p>管理翻译语言列表，数据存储于 MongoDB。</p>
+                      </div>
+
+                      <div className="token-add-box">
+                        <h4>新增语言</h4>
+                        <div className="token-add-row">
+                          <input
+                            className="token-input"
+                            value={newLangCode}
+                            onChange={(e) => setNewLangCode(e.target.value)}
+                            placeholder="语言代码（如 vi / ar / zh-cn）"
+                          />
+                          <input
+                            className="token-input"
+                            value={newLangName}
+                            onChange={(e) => setNewLangName(e.target.value)}
+                            placeholder="语言名称（如 越南语）"
+                          />
+                          <button className="preview-btn" onClick={addLanguage} disabled={languageLoading}>
+                            添加语言
+                          </button>
+                        </div>
+                        <div className="token-input-row" style={{ marginTop: 10 }}>
+                          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13 }}>
+                            <input
+                              type="checkbox"
+                              checked={newLangSourceOnly}
+                              onChange={(e) => setNewLangSourceOnly(e.target.checked)}
+                            />
+                            仅允许作为源语言（不出现在目标语言中）
+                          </label>
+                        </div>
+                        <p className="lang-code-hint">
+                          语言 code 请参考 IANA 标准：
+                          {' '}
+                          <a
+                            href="https://www.iana.org/assignments/language-subtag-registry/language-subtag-registry"
+                            target="_blank"
+                            rel="noreferrer"
+                          >
+                            Language Subtag Registry
+                          </a>
+                        </p>
+                      </div>
+
+                      <section className="token-section">
+                        <h4 className="token-section-title">已配置语言 ({languageOptions.length})</h4>
+                        {languageLoading ? (
+                          <div className="empty-state">加载中...</div>
+                        ) : languageOptions.length === 0 ? (
+                          <div className="empty-state">暂无语言配置</div>
+                        ) : (
+                          <div className="tokens-list">
+                            {languageOptions.map((item) => (
+                              <div className="token-item custom" key={item.code}>
+                                <div className="token-meta">
+                                  <div className="token-name">{item.code}</div>
+                                  <div className="token-desc">
+                                    {item.isSourceOnly ? '仅源语言' : '源/目标语言'}
+                                  </div>
+                                </div>
+                                <div className="token-input-wrap">
+                                  <div className="token-input-row">
+                                    <input
+                                      className="token-input"
+                                      value={languageDraftNames[item.code] ?? item.name}
+                                      onChange={(e) => setLanguageDraftNames((prev) => ({
+                                        ...prev,
+                                        [item.code]: e.target.value,
+                                      }))}
+                                      placeholder="语言名称"
+                                    />
+                                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12 }}>
+                                      <input
+                                        type="checkbox"
+                                        checked={item.code === 'auto' ? true : Boolean(item.isSourceOnly)}
+                                        disabled={item.code === 'auto'}
+                                        onChange={(e) => setLanguageOptions((prev) => prev.map((lang) => (
+                                          lang.code === item.code
+                                            ? { ...lang, isSourceOnly: e.target.checked }
+                                            : lang
+                                        )))}
+                                      />
+                                      仅源语言
+                                    </label>
+                                    <button
+                                      type="button"
+                                      className="save-btn secondary language-action-btn language-save-btn"
+                                      onClick={() => updateLanguage(item.code)}
+                                      disabled={languageLoading}
+                                    >
+                                      保存
+                                    </button>
+                                  </div>
+                                </div>
+                                <button
+                                  className="token-remove-btn language-action-btn language-delete-btn"
+                                  onClick={() => removeLanguage(item.code)}
+                                  disabled={item.code === 'auto' || languageLoading}
+                                >
+                                  删除
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </section>
+                    </div>
                   )}
                 />
 

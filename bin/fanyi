@@ -1,3 +1,13 @@
 #!/usr/bin/env sh
-SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+# 兼容 npm link 场景：先解析软链，再定位真实脚本目录
+SOURCE="$0"
+while [ -L "$SOURCE" ]; do
+  DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
+  LINK_TARGET="$(readlink "$SOURCE")"
+  case "$LINK_TARGET" in
+    /*) SOURCE="$LINK_TARGET" ;;
+    *) SOURCE="$DIR/$LINK_TARGET" ;;
+  esac
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$SOURCE")" && pwd)"
 exec node --import tsx "$SCRIPT_DIR/fanyi.ts" "$@"
