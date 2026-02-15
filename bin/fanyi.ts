@@ -139,7 +139,7 @@ API Key配置:
 program
   .name('fanyi')
   .description('一个功能强大的命令行翻译工具')
-  .version('1.0.0');
+  .version('1.0.0', '-v, --version', '显示版本信息');
 
 // web命令 - 启动Web界面
 program

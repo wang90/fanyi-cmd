@@ -62,7 +62,7 @@ function saveConfig(config: typeof DEFAULT_CONFIG): void {
 program
   .name('ai')
   .description('AI 命令行助手')
-  .version('1.0.0');
+  .version('1.0.0', '-v, --version', '显示版本信息');
 
 program
   .command('web')
