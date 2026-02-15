@@ -4,6 +4,7 @@ import { MongoClient, ObjectId } from 'mongodb';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { spawn } from 'child_process';
 import { translate as previewTranslate, askStream as askAIStream } from '../src/providers.js';
 import { saveAskHistory, saveHistory } from '../src/db.js';
 
@@ -552,9 +553,7 @@ app.use('/api/*', (req, res) => {
 
 // 静态文件服务（React构建后的文件）- 必须在API路由之后
 const webBuildPath = path.join(__dirname, '../web/dist');
-if (fs.existsSync(webBuildPath)) {
-  app.use(express.static(webBuildPath));
-}
+app.use(express.static(webBuildPath));
 
 // 所有其他GET请求返回React应用（必须在所有API路由之后）
 app.get('*', (req, res) => {
@@ -566,8 +565,46 @@ app.get('*', (req, res) => {
   }
 });
 
+function runCommand(command: string, args: string[], cwd: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, {
+      cwd,
+      stdio: 'inherit',
+      shell: process.platform === 'win32',
+    });
+    child.on('error', reject);
+    child.on('exit', (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      reject(new Error(`${command} ${args.join(' ')} exited with code ${code}`));
+    });
+  });
+}
+
+async function ensureWebBuild(): Promise<void> {
+  const webDir = path.join(__dirname, '../web');
+  const indexPath = path.join(webBuildPath, 'index.html');
+  if (fs.existsSync(indexPath)) {
+    return;
+  }
+
+  console.log('⚙️ 检测到 Web 界面未构建，正在自动构建...');
+  try {
+    await runCommand('pnpm', ['build'], webDir);
+    console.log('✅ Web 界面构建完成');
+  } catch (pnpmError) {
+    console.warn(`⚠️ 使用 pnpm 构建失败: ${(pnpmError as Error).message}`);
+    console.log('🔁 尝试使用 npm 继续构建...');
+    await runCommand('npm', ['run', 'build'], webDir);
+    console.log('✅ Web 界面构建完成');
+  }
+}
+
 // 启动服务器
 export async function startServer(): Promise<void> {
+  await ensureWebBuild();
   await connectDB();
   app.listen(PORT, () => {
     console.log(`🚀 Web服务器已启动: http://localhost:${PORT}`);
