@@ -5,6 +5,7 @@
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_PATH="$SCRIPT_DIR/bin/fanyi"
 AI_BIN_PATH="$SCRIPT_DIR/bin/ai"
+ZSH_INTEGRATION_PATH="$SCRIPT_DIR/scripts/ai-shell.zsh"
 
 echo "🚀 正在安装 ai-cmd..."
 
@@ -29,6 +30,12 @@ if npm link 2>/dev/null; then
             echo "export PATH=\"$NPM_BIN_DIR:\$PATH\"" >> "$HOME/.bashrc"
             echo "✅ 已添加到 ~/.bashrc"
             echo "请运行: source ~/.bashrc 或重新打开终端"
+        fi
+    fi
+    if [ -n "$ZSH_VERSION" ]; then
+        if ! grep -q "source \"$ZSH_INTEGRATION_PATH\"" "$HOME/.zshrc" 2>/dev/null; then
+            echo "source \"$ZSH_INTEGRATION_PATH\"" >> "$HOME/.zshrc"
+            echo "✅ 已启用 zsh 集成：ai 执行后自动预填 ai"
         fi
     fi
     echo "✅ 安装成功！"
@@ -59,10 +66,16 @@ if [ -n "$SHELL_RC" ]; then
     if ! grep -q "alias fanyi=" "$SHELL_RC" 2>/dev/null; then
         echo "alias fanyi=\"$BIN_PATH\"" >> "$SHELL_RC"
     fi
-    if ! grep -q "alias ai=" "$SHELL_RC" 2>/dev/null; then
-        echo "alias ai=\"$AI_BIN_PATH\"" >> "$SHELL_RC"
+    if [ -n "$ZSH_VERSION" ]; then
+        if ! grep -q "source \"$ZSH_INTEGRATION_PATH\"" "$SHELL_RC" 2>/dev/null; then
+            echo "source \"$ZSH_INTEGRATION_PATH\"" >> "$SHELL_RC"
+        fi
+    else
+        if ! grep -q "alias ai=" "$SHELL_RC" 2>/dev/null; then
+            echo "alias ai=\"$AI_BIN_PATH\"" >> "$SHELL_RC"
+        fi
     fi
-    echo "✅ 已添加命令别名到 $SHELL_RC（若已存在则跳过）"
+    echo "✅ 已写入命令配置到 $SHELL_RC（若已存在则跳过）"
     echo ""
     echo "请运行以下命令使别名生效："
     echo "  source $SHELL_RC"

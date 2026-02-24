@@ -2,6 +2,8 @@
 import { Command } from 'commander';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
+import { spawnSync } from 'child_process';
 import { ask, askStream } from '../src/providers.js';
 import { saveAskHistory } from '../src/db.js';
 
@@ -59,6 +61,42 @@ function saveConfig(config: typeof DEFAULT_CONFIG): void {
   }
 }
 
+function readQuestionFromEditor(): string {
+  const editor = process.env.VISUAL || process.env.EDITOR || (process.platform === 'win32' ? 'notepad' : 'vi');
+  const tempFilePath = path.join(
+    os.tmpdir(),
+    `ai-cmd-question-${Date.now()}-${Math.random().toString(36).slice(2)}.txt`
+  );
+
+  try {
+    fs.writeFileSync(
+      tempFilePath,
+      '# 在下方输入你的问题，保存并关闭编辑器后将自动发送\n\n',
+      'utf-8'
+    );
+    const result = spawnSync(editor, [tempFilePath], { stdio: 'inherit' });
+    if (result.error) {
+      throw result.error;
+    }
+    if (typeof result.status === 'number' && result.status !== 0) {
+      throw new Error(`编辑器退出码异常: ${result.status}`);
+    }
+    const content = fs.readFileSync(tempFilePath, 'utf-8');
+    const question = content
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n')
+      .trim();
+    return question;
+  } finally {
+    try {
+      fs.unlinkSync(tempFilePath);
+    } catch {
+      // 临时文件删除失败不影响主流程
+    }
+  }
+}
+
 program
   .name('ai')
   .description('AI 命令行助手')
@@ -103,9 +141,18 @@ program
   .option('-p, --provider <provider>', '本次问答使用的AI服务提供商 (deepseek/qwen/openai)')
   .argument('[question...]', '要提问的内容')
   .action(async (question: string[], options: { provider?: string }) => {
-    const input = question.join(' ').trim();
+    let input = question.join(' ').trim();
     if (!input) {
-      program.outputHelp();
+      try {
+        input = readQuestionFromEditor();
+      } catch (err) {
+        console.error(`\n❌ 打开编辑器失败: ${(err as Error).message}\n`);
+        process.exitCode = 1;
+        return;
+      }
+    }
+    if (!input) {
+      console.log('\n⚠️ 未输入问题，已取消。\n');
       return;
     }
 

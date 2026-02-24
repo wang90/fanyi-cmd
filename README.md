@@ -58,6 +58,7 @@ ai web
 
 - `ai` 仅支持问答型 provider：`deepseek / qwen / openai`
 - `libre` 只用于翻译，不支持通用问答
+- zsh 下可启用项目内集成：执行成功后，下一次命令行自动预填 `ai `
 
 ### `fanyi`（翻译命令）
 
@@ -170,6 +171,14 @@ npm link
 ai -h
 fanyi -h
 ```
+
+如需启用 zsh 自动预填（项目内提供）：
+
+```bash
+source "$(pwd)/scripts/ai-shell.zsh"
+```
+
+建议将上面这行加入 `~/.zshrc`，或直接执行 `./install.sh` 自动写入。
 
 ## 文档目录
 

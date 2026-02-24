@@ -115,6 +115,7 @@ function App() {
   const [newLangName, setNewLangName] = useState('');
   const [newLangSourceOnly, setNewLangSourceOnly] = useState(false);
   const tokenInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const askTextareaRef = useRef<HTMLTextAreaElement | null>(null);
 
   const AI_PROVIDERS = Object.fromEntries(
     Object.entries(PROVIDERS).filter(([key]) => key !== 'libre')
@@ -569,6 +570,22 @@ function App() {
     }
     setAskLoading(true);
     setAskAnswer('');
+    const autoFillFollowUpInput = () => {
+      if (!question) return;
+      const nextInput = /^ai\s+/i.test(question) ? question : `ai ${question}`;
+      setAskQuestion(nextInput);
+      if (typeof window !== 'undefined') {
+        window.requestAnimationFrame(() => {
+          const textarea = askTextareaRef.current;
+          if (!textarea) return;
+          textarea.focus();
+          if (typeof textarea.setSelectionRange === 'function') {
+            const end = textarea.value.length;
+            textarea.setSelectionRange(end, end);
+          }
+        });
+      }
+    };
     try {
       const response = await fetch(`${API_BASE}/ask`, {
         method: 'POST',
@@ -598,19 +615,23 @@ function App() {
       if (!reader) {
         const text = await response.text();
         setAskAnswer(text || '');
+        autoFillFollowUpInput();
         showMessage('success', '回答已生成');
         return;
       }
 
       const decoder = new TextDecoder('utf-8');
+      let fullAnswer = '';
       while (true) {
         const { done, value } = await reader.read();
         if (done) break;
         const chunkText = decoder.decode(value, { stream: true });
         if (chunkText) {
+          fullAnswer += chunkText;
           setAskAnswer((prev) => prev + chunkText);
         }
       }
+      autoFillFollowUpInput();
       showMessage('success', '回答已生成');
     } catch (error) {
       showMessage(
@@ -776,6 +797,7 @@ function App() {
                   <div className="assistant-question-block">
                     <label className="assistant-label">问题输入</label>
                     <textarea
+                      ref={askTextareaRef}
                       className="assistant-textarea"
                       value={askQuestion}
                       onChange={(e) => setAskQuestion(e.target.value)}
